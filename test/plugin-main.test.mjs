@@ -8,6 +8,21 @@ import { fileURLToPath } from 'node:url';
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const pluginMainPath = path.join(testDir, '..', 'plugin', 'main.js');
 
+test('Cindy global-settings panel delegates through the unprivileged panel channel', () => {
+  const source = fs.readFileSync(pluginMainPath, 'utf8');
+  const manifest = JSON.parse(fs.readFileSync(path.join(testDir, '..', 'plugin', 'ghost.json'), 'utf8'));
+  const panel = fs.readFileSync(path.join(testDir, '..', 'plugin', 'panel.html'), 'utf8');
+  assert.ok(manifest.slots.includes('panel'));
+  assert.equal(manifest.panel?.html, 'panel.html');
+  assert.match(source, /BroadcastChannel\('claw-kit-global-settings'\)/);
+  assert.match(source, /nodeRequest\('claw\/global-config'/);
+  assert.match(panel, /BroadcastChannel\('claw-kit-global-settings'\)/);
+  assert.match(panel, /<option value="true">开启<\/option><option value="false">关闭<\/option>/);
+  assert.doesNotMatch(panel, /继承/);
+  assert.doesNotMatch(panel, /mergeToggle|delete base\[id\]/);
+  assert.doesNotMatch(panel, /electronAPI|cindy\.node|ipcRenderer/);
+});
+
 function flushAsyncWork() {
   return new Promise((resolve) => setImmediate(resolve));
 }

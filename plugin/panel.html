@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>claw 设置</title>
+<style>
+  :root{color:var(--foreground,#202124);background:var(--panel-bg,#fff);font:13px/1.45 ui-sans-serif,"Microsoft YaHei",sans-serif;--line:color-mix(in srgb,var(--foreground,#202124) 15%,transparent);--muted:color-mix(in srgb,var(--foreground,#202124) 60%,transparent);--accent:#356fd6}
+  body{margin:0;padding:18px;max-width:560px}.eyebrow{color:var(--accent);font-size:11px;font-weight:700;letter-spacing:.12em}.order{margin:8px 0 18px;padding:9px 11px;border-left:3px solid var(--accent);background:color-mix(in srgb,var(--accent) 7%,transparent);font-size:12px}.section{margin:18px 0;border-top:1px solid var(--line);padding-top:14px}.section h2{font-size:13px;margin:0 0 8px}.row{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:42px}.row+ .row{border-top:1px solid color-mix(in srgb,var(--foreground,#202124) 8%,transparent)}.row small{display:block;color:var(--muted);margin-top:1px}.choice{min-width:76px;box-sizing:border-box;border:1px solid var(--line);border-radius:7px;background:transparent;color:inherit;padding:6px 8px;font:inherit}.field{display:grid;gap:5px;margin:10px 0}.field input,.field select,textarea{box-sizing:border-box;width:100%;border:1px solid var(--line);border-radius:7px;background:transparent;color:inherit;padding:7px 9px;font:inherit}.field label{font-weight:600}textarea{min-height:180px;font:12px/1.45 ui-monospace,Consolas,monospace}.actions{display:flex;gap:8px;margin-top:18px}button{border:0;border-radius:7px;padding:8px 12px;background:var(--accent);color:white;font:inherit;cursor:pointer}button.secondary{background:color-mix(in srgb,var(--foreground,#202124) 10%,transparent);color:inherit}#status{min-height:18px;margin-top:10px;color:var(--muted)}details{margin-top:16px}summary{cursor:pointer;color:var(--muted)}.error{color:#bd3030!important}
+</style>
+<div class="eyebrow">CLAW / GLOBAL</div><h1>全局默认设置</h1>
+<div class="order"><b>用户全局默认值</b> → 项目团队 → 项目个人</div>
+<form id="form">
+  <section class="section"><h2>工作流</h2>
+    <div class="row"><span>启用规划<small>新计划先进入需求讨论</small></span><select class="choice" id="planning"><option value="true">开启</option><option value="false">关闭</option></select></div>
+    <div class="row"><span>自动更新提示<small>发现版本漂移时提示更新</small></span><select class="choice" id="autoUpdate"><option value="true">开启</option><option value="false">关闭</option></select></div>
+    <div class="row"><span>目标续航<small>任务执行时使用 Goal continuation</small></span><select class="choice" id="goalMode"><option value="true">开启</option><option value="false">关闭</option></select></div>
+    <div class="row"><span>GitNexus 集成<small>启用项目图谱刷新</small></span><select class="choice" id="gitnexus"><option value="true">开启</option><option value="false">关闭</option></select></div>
+  </section>
+  <section class="section"><h2>记忆</h2>
+    <div class="row"><span>项目记忆<small>控制 embedding 刷新与 claw search</small></span><select class="choice" id="memoryEnabled"><option value="true">开启</option><option value="false">关闭</option></select></div>
+    <div class="field"><label for="externalPlanningSkill">规划 skill</label><input id="externalPlanningSkill" placeholder="留空使用 claw-kit:planning"></div>
+    <div class="field"><label for="writerModel">知识收尾模型</label><input id="writerModel" placeholder="留空使用宿主默认"></div>
+    <div class="field"><label for="reasoningEffort">知识收尾推理强度</label><select id="reasoningEffort"><option value="">宿主默认</option><option>minimal</option><option>low</option><option>medium</option><option>high</option><option>xhigh</option></select></div>
+  </section>
+  <details><summary>高级：完整 JSON（保留未提供表单的字段）</summary><textarea id="config" aria-label="全局配置 JSON">{}</textarea></details>
+  <div class="actions"><button type="button" id="reload" class="secondary">重新读取</button><button type="submit">保存全局配置</button></div><div id="status" role="status"></div>
+</form>
+<script>
+const channel=new BroadcastChannel('claw-kit-global-settings'),$=id=>document.getElementById(id),ids=['planning','autoUpdate','goalMode','gitnexus'];let current={};
+function setForm(c){current=c||{};ids.forEach(id=>$(id).value=String(current[id]));$('memoryEnabled').value=String(current.memory?.enabled);$('externalPlanningSkill').value=current.externalPlanningSkill??'';$('writerModel').value=current.knowledgeWriter?.model??'';$('reasoningEffort').value=current.knowledgeWriter?.reasoningEffort??'medium';$('config').value=JSON.stringify(current,null,2)}
+function merged(){let base;try{base=JSON.parse($('config').value)}catch(e){throw Error('高级 JSON 无法解析。')}if(!base||Array.isArray(base)||typeof base!=='object')throw Error('高级 JSON 必须是对象。');ids.forEach(id=>base[id]=$(id).value==='true');base.memory={...(base.memory||{}),enabled:$('memoryEnabled').value==='true'};base.externalPlanningSkill=$('externalPlanningSkill').value.trim()||null;base.knowledgeWriter={...(base.knowledgeWriter||{}),model:$('writerModel').value.trim()||null,reasoningEffort:$('reasoningEffort').value};return base}
+function request(type,config){channel.postMessage({type,config})}channel.onmessage=({data})=>{if(!data||data.type!=='global-settings-result')return;if(data.ok){if(data.config)setForm(data.config);$('status').className='';$('status').textContent=`${data.message||'已完成'}${data.path?'\n'+data.path:''}`}else{$('status').className='error';$('status').textContent=data.message||'操作失败'}};
+$('reload').onclick=()=>{$('status').textContent='正在读取…';request('get')};$('form').onsubmit=e=>{e.preventDefault();try{$('status').textContent='正在保存…';request('set',merged())}catch(error){$('status').className='error';$('status').textContent=error.message}};request('get');
+</script>
+</html>

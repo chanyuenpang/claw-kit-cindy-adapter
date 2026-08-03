@@ -4,12 +4,17 @@
   "name": "claw-kit",
   "description": "Cindy workflow tools, lifecycle guidance, and Skills for claw-kit.",
   "whenToUse": "Use for Cindy sessions that need claw-kit plan, task, subplan, or workflow operations.",
-  "version": "0.2.8.2",
+  "version": "0.2.9.1",
   "kind": "chip",
   "entry": "main.js",
   "launch": "resident",
   "icon": "assets/icon.png",
-  "slots": ["agent", "node", "session-context", "skill", "subscribe", "tool", "card"],
+  "slots": ["agent", "node", "session-context", "skill", "subscribe", "tool", "card", "panel"],
+  "panel": {
+    "title": "claw 设置",
+    "position": "tab",
+    "html": "panel.html"
+  },
   "agent": { "background": true },
   "node": {
     "entry": "node/claw-worker.cjs",
