@@ -18,6 +18,12 @@ test('Cindy global-settings panel delegates through the unprivileged panel chann
   assert.match(source, /nodeRequest\('claw\/global-config'/);
   assert.match(panel, /BroadcastChannel\('claw-kit-global-settings'\)/);
   assert.match(panel, /<option value="true">开启<\/option><option value="false">关闭<\/option>/);
+  for (const field of [
+    'version', 'maxTasksToKeep', 'defaultPlanTemplate', 'contextPaths',
+    'executionPolicy', 'externalSkills', 'datedSectionsToKeep', 'externalDocPaths',
+    'embeddingProvider', 'embeddingModel', 'remoteApiKeyEnvVar', 'localModelPath', 'variables',
+  ]) assert.match(panel, new RegExp(`id="${field}"`));
+  assert.match(panel, /delete base\.id;delete base\.name;/);
   assert.doesNotMatch(panel, /继承/);
   assert.doesNotMatch(panel, /mergeToggle|delete base\[id\]/);
   assert.doesNotMatch(panel, /electronAPI|cindy\.node|ipcRenderer/);
