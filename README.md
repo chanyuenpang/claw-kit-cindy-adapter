@@ -12,7 +12,10 @@ into the plugin.
   Agent Tool gateway, trusted `session-context`, and narrowly declared
   `node` and background `agent` capabilities.
 - The `claw` CLI remains a separate installation and upgrade surface.
-- The Cindy adapter is local-workspace-only in the first version.
+- This repository is the Cindy-only Git marketplace source. Add
+  `https://github.com/chanyuenpang/claw-kit-cindy-adapter.git` in Cindy to
+  discover the `claw-kit-cindy` entry; installation payloads live under
+  `plugin/`.
 - Cindy Desktop Host provides the lifecycle dispatcher for plugin-declared
   Ghost hooks. User-facing Orca Lead sessions remain eligible for ordinary
   Ghost lifecycle hooks while Workers are excluded; that Host fix is independent

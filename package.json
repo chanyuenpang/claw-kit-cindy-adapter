@@ -12,10 +12,9 @@
     "knowledge-capture",
     "adapter"
   ],
-  "homepage": "https://github.com/chanyuenpang/claw-kit",
+  "homepage": "https://github.com/chanyuenpang/claw-kit-cindy-adapter",
   "repository": {
     "type": "git",
-    "url": "https://github.com/chanyuenpang/claw-kit.git",
-    "directory": "packages/cindy-adapter"
+    "url": "https://github.com/chanyuenpang/claw-kit-cindy-adapter.git"
   }
 }

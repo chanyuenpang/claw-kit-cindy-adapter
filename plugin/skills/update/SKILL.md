@@ -27,9 +27,9 @@ Resolve `<skill-dir>` as the directory containing this loaded `SKILL.md`.
 
 - Refresh the published global CLI first, then the Cindy plugin through its
   custom Git marketplace.
-- Use the Git source `chanyuenpang/claw-kit` without a pinned ref so Cindy tracks
-  the repository default branch. The marketplace entry `claw-kit-cindy` points
-  at `packages/cindy-adapter/plugin` and the plugin id remains `claw-kit`.
+- Use the Git source `chanyuenpang/claw-kit-cindy-adapter` without a pinned ref
+  so Cindy tracks the repository default branch. The marketplace entry
+  `claw-kit-cindy` points at `plugin` and the plugin id remains `claw-kit`.
 - Refresh that marketplace source, review any permission expansion, and use
   Cindy's install/update action. Cindy packages the source locally; do not
   download or open a `.cindy` archive.

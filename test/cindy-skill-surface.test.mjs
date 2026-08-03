@@ -21,11 +21,9 @@ test('Cindy plugin exposes the full claw-kit skill surface', async () => {
   }
 });
 
-test('Cindy release and update contracts use the repository custom marketplace without archive assets', async () => {
-  const [marketplaceSource, releaseSkill, releaseRule, skill, template, fallback, coverage] = await Promise.all([
-    readFile(new URL('../../../.agents/plugins/marketplace.json', import.meta.url), 'utf8'),
-    readFile(new URL('../../../.agents/skills/release-cindy-plugin/SKILL.md', import.meta.url), 'utf8'),
-    readFile(new URL('../../../.agents/skills/release-cindy-plugin/references/artifact.md', import.meta.url), 'utf8'),
+test('Cindy marketplace and update contracts are self-contained without archive assets', async () => {
+  const [marketplaceSource, skill, template, fallback, coverage] = await Promise.all([
+    readFile(new URL('../.agents/plugins/marketplace.json', import.meta.url), 'utf8'),
     readFile(new URL('skills/update/SKILL.md', root), 'utf8'),
     readFile(new URL('skills/update/TEMPLATE.json', root), 'utf8'),
     readFile(new URL('skills/update/non-claw-fallback.md', root), 'utf8'),
@@ -36,60 +34,19 @@ test('Cindy release and update contracts use the repository custom marketplace w
   assert.ok(marketplace.plugins.some((entry) =>
     entry.name === 'claw-kit-cindy' &&
     entry.source?.source === 'local' &&
-    entry.source?.path === './packages/cindy-adapter/plugin'
+    entry.source?.path === './plugin'
   ));
 
-  const contract = `${releaseSkill}\n${releaseRule}\n${skill}\n${template}\n${fallback}\n${coverage}`;
+  const contract = `${skill}\n${template}\n${fallback}\n${coverage}`;
   assert.match(contract, /custom (?:Git )?marketplace/i);
-  assert.match(contract, /chanyuenpang\/claw-kit/);
+  assert.match(contract, /chanyuenpang\/claw-kit-cindy-adapter/);
   assert.match(contract, /claw-kit-cindy/);
   assert.match(skill, /Cindy-owned update implementation/);
   assert.match(skill, /Each supported platform maintains\s+its own adjacent `update` skill/);
   assert.match(skill, /shared\s+global CLI together with that platform's plugin/);
   assert.match(skill, /without a pinned ref/);
   assert.match(fallback, /legacy manual `claw-kit` install conflicts/);
-  assert.match(releaseSkill, /Do not\s+build or upload a `\.cindy` archive/is);
   assert.match(skill, /do not\s+download or open a `\.cindy` archive/is);
-  assert.doesNotMatch(`${releaseSkill}\n${releaseRule}`, /GitHub Release must contain|attach.*\.cindy/is);
-});
-
-test('Repository Cindy E2E skill creates separate Codex and non-Codex lanes and leaves lifecycle semantics to using-claw-kit', async () => {
-  const [source, interfaceSource] = await Promise.all([
-    readFile(new URL('../../../.agents/skills/cindy-claw-e2e/SKILL.md', import.meta.url), 'utf8'),
-    readFile(new URL('../../../.agents/skills/cindy-claw-e2e/agents/openai.yaml', import.meta.url), 'utf8'),
-  ]);
-  assert.match(source, /Use this skill in the controller or implementation thread/);
-  assert.match(source, /Run two independent lanes/);
-  assert.match(source, /a Codex main session/);
-  assert.match(source, /a non-Codex main session/);
-  assert.match(source, /Dispatch both lanes in the same controller run/);
-  assert.match(source, /Do not end the controller turn\s+after creating only the first lane/);
-  assert.match(source, /call\s+`send_to_session` in create mode/);
-  assert.match(source, /omit `target_session_id`/);
-  assert.match(source, /set `working_dir` to the absolute project root/);
-  assert.match(source, /set `use_worktree` to `false`/);
-  assert.match(source, /`agent_kind: codex`/);
-  assert.match(source, /DeepSeek or other non-GPT model/);
-  assert.match(source, /helper create mode inherits the current session's agent and model/);
-  assert.match(source, /do not call it from a Codex controller\s+to fabricate the non-Codex lane/);
-  assert.match(source, /two-session launcher flow/);
-  assert.match(source, /Global\s+New may create `workspaceKind: dialogue`/);
-  assert.match(source, /absolute project root as `working_dir`/);
-  assert.match(source, /`workspaceKind` is not `dialogue`/);
-  assert.match(source, /perform New,[\s\S]*in one UI transaction/);
-  assert.match(source, /prompt leaves the composer and a new session id/);
-  assert.match(source, /Obtain concrete\s+creation receipts for both lanes before ending the controller turn/i);
-  assert.match(source, /测试通道：\{\{lane\}\}/);
-  assert.match(source, /唯一计划标题：\{\{title\}\}/);
-  assert.match(source, /唯一任务结论标记：\{\{marker\}\}/);
-  assert.match(source, /using-claw-kit/);
-  assert.match(source, /cindy_helper\.get_chat_history/);
-  assert.match(source, /The controller owns this inspection/);
-  assert.match(source, /one passing lane never proves the other/);
-  assert.doesNotMatch(source, /literal argument `"scope": "project"`/);
-  assert.doesNotMatch(source, /cindy_orca\./);
-  assert.doesNotMatch(source, /\$cindy-claw-e2e/);
-  assert.match(interfaceSource, /dispatch both Codex and non-Codex normal Cindy project lanes in one controller run/);
 });
 
 test('Cindy omits WUM prompt injection and keeps session-start work asynchronous', async () => {

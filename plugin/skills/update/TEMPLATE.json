@@ -11,7 +11,7 @@
     "openQuestions": [],
     "acceptanceCriteria": [
       "The published global `@veewo/claw` CLI and Cindy plugin are both refreshed.",
-      "The Cindy source is the unpinned `chanyuenpang/claw-kit` custom marketplace and its `claw-kit-cindy` entry.",
+      "The Cindy source is the unpinned `chanyuenpang/claw-kit-cindy-adapter` custom marketplace and its `claw-kit-cindy` entry.",
       "The marketplace manifest, installed plugin id, enabled state, and runtime state are verified against the target version.",
       "The result reports exact success or failure for each surface."
     ]
@@ -20,13 +20,13 @@
     {
       "id": 1,
       "title": "Confirm the published target version and Cindy marketplace source",
-      "detail": "Tell the user a newer claw-kit version was detected. Confirm Cindy has or can add the unpinned Git source `chanyuenpang/claw-kit`, refresh it, and verify marketplace entry `claw-kit-cindy` resolves plugin id `claw-kit` from `packages/cindy-adapter/plugin`. Read the candidate version from that source's `ghost.json`. A release workflow must push and tag the source before installation refresh.",
+      "detail": "Tell the user a newer claw-kit version was detected. Confirm Cindy has or can add the unpinned Git source `chanyuenpang/claw-kit-cindy-adapter`, refresh it, and verify marketplace entry `claw-kit-cindy` resolves plugin id `claw-kit` from `plugin`. Read the candidate version from that source's `ghost.json`. A release workflow must push and tag the source before installation refresh.",
       "status": "pending"
     },
     {
       "id": 2,
       "title": "Refresh the CLI and Cindy plugin",
-      "detail": "Refresh the global CLI first from its published package. Refresh the `chanyuenpang/claw-kit` custom market, review any permission expansion, and accept Cindy's install/update confirmation for plugin id `claw-kit`. If a legacy manual install conflicts, permit exact-manifest adoption only; otherwise uninstall it and perform one marketplace install. Do not download or open a `.cindy` archive.",
+      "detail": "Refresh the global CLI first from its published package. Refresh the `chanyuenpang/claw-kit-cindy-adapter` custom market, review any permission expansion, and accept Cindy's install/update confirmation for plugin id `claw-kit`. If a legacy manual install conflicts, permit exact-manifest adoption only; otherwise uninstall it and perform one marketplace install. Do not download or open a `.cindy` archive.",
       "status": "pending",
       "guidance": {
         "onDone": {
@@ -63,7 +63,7 @@
     "Follow returned workflowGuidance before advancing.",
     "Do not route or ask about another host; this is the Cindy update workflow.",
     "Publish and verify the target version before release-time installation refresh.",
-    "Use only the unpinned `chanyuenpang/claw-kit` custom marketplace and the installed plugin id `claw-kit`.",
+    "Use only the unpinned `chanyuenpang/claw-kit-cindy-adapter` custom marketplace and the installed plugin id `claw-kit`.",
     "Do not claim success unless both CLI and Cindy plugin verification pass."
   ]
 }

@@ -5,9 +5,9 @@ Use this path only when no `.claw` project is available.
 1. Refresh the CLI with `npm install -g @veewo/claw@latest` and verify it with
    `claw --version` plus `npm list -g @veewo/claw --depth=0`.
 2. In Cindy's plugin marketplace sources, add or refresh the Git source
-   `chanyuenpang/claw-kit` without a pinned ref. Confirm the discovered market is
+   `chanyuenpang/claw-kit-cindy-adapter` without a pinned ref. Confirm the discovered market is
    `claw-kit` and its `claw-kit-cindy` entry resolves plugin id `claw-kit` from
-   `packages/cindy-adapter/plugin`.
+   `plugin`.
 3. Review any permission expansion and accept Cindy's install/update
    confirmation. Cindy builds the install package from the checked-out market
    source; do not download or open a `.cindy` archive.
