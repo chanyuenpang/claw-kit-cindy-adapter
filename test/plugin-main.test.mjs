@@ -12,8 +12,8 @@ test('Cindy global-settings panel delegates through the unprivileged panel chann
   const source = fs.readFileSync(pluginMainPath, 'utf8');
   const manifest = JSON.parse(fs.readFileSync(path.join(testDir, '..', 'plugin', 'ghost.json'), 'utf8'));
   const panel = fs.readFileSync(path.join(testDir, '..', 'plugin', 'panel.html'), 'utf8');
-  assert.ok(manifest.slots.includes('panel'));
-  assert.equal(manifest.panel?.html, 'panel.html');
+  assert.equal(manifest.settingsHtml, 'panel.html');
+  assert.equal(manifest.slots.includes('panel'), false);
   assert.match(source, /BroadcastChannel\('claw-kit-global-settings'\)/);
   assert.match(source, /nodeRequest\('claw\/global-config'/);
   assert.match(panel, /BroadcastChannel\('claw-kit-global-settings'\)/);
