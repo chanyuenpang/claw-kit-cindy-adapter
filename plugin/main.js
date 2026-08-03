@@ -19,33 +19,6 @@ const expandedWorkflowCards = new Map();
 const cardSessions = new Map();
 const cardInteractionTimers = new Map();
 const cardLastUpdatedAt = new Map();
-const globalSettingsChannel = typeof BroadcastChannel === 'function'
-  ? new BroadcastChannel('claw-kit-global-settings')
-  : null;
-
-function settingsWorkdir() {
-  return workdirs.values().next().value || undefined;
-}
-
-if (globalSettingsChannel) {
-  globalSettingsChannel.onmessage = async ({ data }) => {
-    if (!data || (data.type !== 'get' && data.type !== 'set')) return;
-    const response = await nodeRequest('claw/global-config', {
-      mode: data.type,
-      ...(data.type === 'set' ? { config: data.config } : {}),
-      workdir: settingsWorkdir(),
-    });
-    if (response?.ok === false) {
-      globalSettingsChannel.postMessage({ type: 'global-settings-result', ok: false, message: response.reason });
-      return;
-    }
-    globalSettingsChannel.postMessage({
-      type: 'global-settings-result', ok: true, config: response.config,
-      path: response.path, message: data.type === 'set' ? '已保存；下一次 claw 操作生效。' : '已读取全局配置。',
-    });
-  };
-}
-
 function traceHook(hook, fields = {}) {
   // Keep a machine-readable runtime trace so Hook delivery can be proven from
   // the Cindy plugin log instead of inferred from the model's reply.

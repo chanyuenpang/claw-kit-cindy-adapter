@@ -827,20 +827,6 @@ rpcInput.on('line', async (line) => {
     reply(request.id, context);
     return;
   }
-  if (request.method === 'claw/global-config') {
-    const mode = params.mode === 'set' ? 'set' : 'get';
-    const cwd = typeof params.workdir === 'string' && params.workdir ? params.workdir : process.cwd();
-    const args = mode === 'set'
-      ? ['config', 'global', 'set', '--json', JSON.stringify(params.config || {})]
-      : ['config', 'global', 'get'];
-    const result = await runClaw(args, cwd, undefined, 10_000, params.sessionId);
-    if (!result.ok) {
-      reply(request.id, result);
-      return;
-    }
-    reply(request.id, result.output);
-    return;
-  }
   if (request.method === 'claw/session-start') {
     try {
       await ensureSession(params.sessionId, params.workdir);
