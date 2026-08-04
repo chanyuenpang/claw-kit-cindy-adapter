@@ -180,8 +180,9 @@ The Lead sends that prompt unchanged to the persistent Orca
 The Worker calls `knowledge.claim`. Before issuing the claim token, the Cindy
 adapter opens Cindy's local SQLite database read-only, locates the originating
 session and terminal mutation, extracts successful `task.done` conclusions, and
-atomically materializes the adjacent `plan.report`. It then executes ordered
-assignments and calls `knowledge.done`. Neither job creation nor report capture
+atomically materializes the adjacent `plan.report`. The claim returns a frozen
+assignment template, which the Worker executes as a session subplan before it
+calls `knowledge.done`. Neither job creation nor report capture
 depends on `did-turn-end`, `will-assistant-message`, or the Lead's final answer.
 The closeout remains bounded to the originating project and plan; failures stay
 visible and retryable rather than silently marking the job succeeded.

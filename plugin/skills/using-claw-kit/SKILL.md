@@ -22,6 +22,13 @@ Do not infer the route from model data captured during Cindy session start.
 The skill owns this choice; uncertainty always falls back to the Cindy Ghost
 tool path.
 
+## Cindy Orca agents
+
+In Cindy, every claw-kit delegation uses the corresponding Orca Agent, exposed
+by the Host as an Orca Worker. Apply the requested task scope, authorization,
+model, effort, and asynchronous completion semantics directly to the Orca Agent
+lifecycle.
+
 ## Knowledge finalizer dispatch
 
 Session scope is temporary and does not persist project knowledge. Its terminal
@@ -32,9 +39,12 @@ knowledge-finalization flow.
 This section applies to both execution routes. Cindy has one knowledge-closeout
 execution model: a persistent, UI-visible Orca Worker. When a terminal plan
 mutation returns a valid `knowledgeDispatch`, dispatch that Worker directly.
-The dispatch is always Orca in Cindy; never use a native subagent or
-`spawn_agent` here. The job already exists durably when the terminal mutation
-returns; neither dispatch nor report capture waits for a Stop hook.
+That `knowledgeDispatch` is the claw-kit Orca authorization for the exact
+`knowledge-finalizer` lifecycle below; no separate user confirmation is
+required. It does not authorize any other Worker. The dispatch is always
+executed by the Orca Agent in Cindy. The job already exists durably when the
+terminal mutation returns; neither dispatch nor report capture waits for a Stop
+hook.
 
 1. Call `cindy_orca.get_workspace_info` and look for a Worker with the stable
    label `knowledge-finalizer`.
@@ -136,8 +146,7 @@ When all plan tasks are complete:
 
 1. Complete the canonical plan transition through the bridge.
 2. If the result contains a `knowledgeDispatch`, dispatch it through the Orca
-   flow above before returning the normal final response. In Cindy, never
-   substitute a native subagent.
+   flow above before returning the normal final response.
 3. Do not wait for a Stop hook or for the Writer to finish. Once dispatch is
    accepted, return the main reply immediately without polling or reading the
    Worker.
@@ -205,8 +214,7 @@ When all plan tasks are complete:
 
 1. Complete the canonical plan transition through `call_tool`.
 2. If the result contains a `knowledgeDispatch`, dispatch it through the Orca
-   flow above before returning the normal final response. In Cindy, never
-   substitute a native subagent.
+   flow above before returning the normal final response.
 3. Do not wait for a Stop hook or for the Writer to finish. Once dispatch is
    accepted, return the main reply immediately without polling or reading the
    Worker; do not manually trigger sync or Goal handling.

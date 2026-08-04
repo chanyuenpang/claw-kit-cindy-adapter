@@ -50,10 +50,9 @@ test('Cindy marketplace and update contracts are self-contained without archive 
 });
 
 test('Cindy omits WUM prompt injection and keeps session-start work asynchronous', async () => {
-  const [source, skill, researcherSkill, manifestSource, worker] = await Promise.all([
+  const [source, skill, manifestSource, worker] = await Promise.all([
     readFile(new URL('main.js', root), 'utf8'),
     readFile(new URL('skills/using-claw-kit/SKILL.md', root), 'utf8'),
-    readFile(new URL('skills/researcher/SKILL.md', root), 'utf8'),
     readFile(new URL('ghost.json', root), 'utf8'),
     readFile(new URL('node/claw-worker.cjs', root), 'utf8'),
   ]);
@@ -95,8 +94,6 @@ test('Cindy omits WUM prompt injection and keeps session-start work asynchronous
   assert.match(skill, /cindy_orca\.create_worker/);
   assert.match(skill, /cindy_orca\.send_to_worker/);
   assert.match(skill, /knowledge-finalizer/);
-  assert.match(skill, /The dispatch is always Orca in Cindy; never use a native\s+subagent or\s+`spawn_agent` here/is);
-  assert.match(researcherSkill, /Never substitute a native subagent.*`spawn_agent`.*`multi_agent_v1`/is);
   assert.match(skill, /Do not wait for the Worker/i);
   assert.match(skill, /Immediately finish the main response after that acknowledgement/i);
   assert.match(skill, /without polling or reading the\s+Worker/i);

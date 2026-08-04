@@ -38,10 +38,11 @@ The installable Ghost source is under [plugin](plugin). It bundles the
 declared workflow Skills plus the runtime hook entry. Cindy normalizes either
 configured knowledge execution policy to the compatibility value `subagent`; the active
 Lead pre-dispatches one persistent, sidebar-visible Orca `knowledge-finalizer` Worker after the terminal
-mutation has created the durable job. The Worker calls the plugin's atomic
-`knowledge.claim`, which captures the originating Cindy task conclusions into
-the adjacent report before issuing a token, executes the canonical assignments,
-and acknowledges completion through `knowledge.done`. Cindy does not use an
+mutation has created the durable job. The Worker creates the packaged session
+delegate plan and calls the plugin's atomic `knowledge.claim`, which captures
+the originating Cindy task conclusions into the adjacent report before issuing
+a token. It executes the returned assignment template as a subplan and
+acknowledges completion through `knowledge.done`. Cindy does not use an
 errand or a Stop hook for knowledge finalization; legacy background jobs are
 diagnostic-only and are not launched.
 Cindy does not inject `additionalContext` into user messages. The plugin starts
