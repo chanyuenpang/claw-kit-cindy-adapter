@@ -55,6 +55,12 @@ returns; neither dispatch nor report capture waits for a Stop hook.
    `knowledge.claim` operation in the returned prompt to capture task
    conclusions and claim the existing job atomically.
 
+**Lead turn boundary:** an accepted Orca Writer dispatch is the terminal action
+of the current Lead turn. Return the normal user-facing completion response
+immediately after the `create_worker` or `send_to_worker` acknowledgement. The
+Writer's report belongs to its own asynchronous turn and must not delay,
+resume, or extend this Lead turn.
+
 Never execute the returned finalizer prompt in the Lead, send it through
 `cindy.agent.errand`, or let a did-turn-end hook create or claim a Cindy
 knowledge job. Legacy Cindy background jobs remain visible for diagnosis but
