@@ -1,6 +1,6 @@
 ---
 name: researcher
-description: Use for focused code investigation, source inspection, symbol or dependency tracing, architecture analysis, and current implementation behavior analysis. In Cindy, run the investigation through a persistent, UI-visible Orca researcher Worker, reusing a matching Worker in the current workflow when possible, and consume its evidence-backed report before completing dependent work.
+description: Use for complex research questions that require an independent, multi-step process of gathering and synthesizing evidence—not direct fact lookups or routine searches.
 ---
 
 # Researcher
@@ -43,7 +43,7 @@ this skill: never repurpose a non-researcher Worker, send research to a
    - `Task`: the concrete question and required evidence
 6. Require the Worker to investigate directly as the sole researcher, preserve repository state, and return `status`, `findings`, `uncertainty`, and `nextStep` with exact paths, symbols, or line anchors.
 7. Accept a dispatch when the Orca response explicitly reports that the task was dispatched, queued, resumed, or already active. Surface every other dispatch outcome immediately.
-8. After a successful dispatch, yield silently and rely on Cindy's automatic delivery of the Worker's report to the Lead. Continue independent work while it runs, then review the report before completing dependent work.
+8. After a successful dispatch, immediately end the current Lead turn without a normal user-facing reply, further tool calls, polling, or independent work. Wait for Cindy's automatic delivery of the Worker's report; only resume the dependent work in the follow-up turn that receives that report.
 9. Keep a useful researcher Worker available for related investigations by default. Archive it or end the team when the user requests that lifecycle change.
 
 ## When running as the researcher Worker
@@ -64,4 +64,3 @@ uncertainty:
 
 nextStep:
 - the most useful action for the coordinating agent
-
