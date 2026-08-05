@@ -4,6 +4,7 @@
   "name": "claw-kit",
   "description": "Cindy workflow tools, lifecycle guidance, and Skills for claw-kit.",
   "whenToUse": "Use for Cindy sessions that need claw-kit plan, task, subplan, or workflow operations.",
+  "command": "claw-kit",
   "version": "0.2.15.1",
   "kind": "chip",
   "entry": "main.js",
@@ -71,9 +72,9 @@
         "description": "Use for complex research questions that require an independent, multi-step process of gathering and synthesizing evidence—not direct fact lookups or routine searches."
       },
       {
-        "dir": "skills/update",
-        "name": "update",
-        "description": "Use when a newer claw-kit version is detected in Cindy or the user asks to refresh the published claw CLI together with the Cindy plugin from the custom Git marketplace."
+        "dir": "skills/claw-kit-doc",
+        "name": "claw-kit-doc",
+        "description": "Use when a user needs claw-kit documentation for updates, project configuration, or Truth and ADR formats."
       }
     ]
   }

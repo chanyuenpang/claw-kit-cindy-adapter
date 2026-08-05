@@ -12,11 +12,16 @@ test('Cindy settings panel documents the two project-owned configuration layers'
   const source = fs.readFileSync(pluginMainPath, 'utf8');
   const manifest = JSON.parse(fs.readFileSync(path.join(testDir, '..', 'plugin', 'ghost.json'), 'utf8'));
   const panel = fs.readFileSync(path.join(testDir, '..', 'plugin', 'panel.html'), 'utf8');
+  const updateReference = fs.readFileSync(path.join(testDir, '..', 'plugin', 'skills', 'claw-kit-doc', 'references', 'update.md'), 'utf8');
   assert.equal(manifest.settingsHtml, 'panel.html');
   assert.equal(manifest.slots.includes('panel'), false);
   assert.match(panel, /\.claw\/project\.json/);
   assert.match(panel, /\.claw\/project-override\.json/);
   assert.match(panel, /claw check/);
+  const updateSteps = [...panel.matchAll(/data-update-step="([^"]+)"/g)].map((match) => match[1]);
+  const referenceSteps = updateReference.match(/cindy-update-steps:\s*([^\s]+)\s*-->/)?.[1].split(',');
+  assert.deepEqual(updateSteps, referenceSteps);
+  assert.match(panel, /刷新市场只更新可用版本信息，不会自动安装插件更新/);
   assert.doesNotMatch(source, /global-settings|claw\/global-config/);
   assert.doesNotMatch(panel, /BroadcastChannel|保存全局配置|全局默认设置/);
 });

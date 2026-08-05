@@ -29,6 +29,12 @@ into the plugin.
   and an active plan may queue one background `agent.run` continuation after
   each completed assistant turn.
 
+## Updating in Cindy
+
+Cindy does not expose an `update` Skill for claw-kit. Follow the Cindy section
+in the shared [claw-kit update reference](plugin/skills/claw-kit-doc/references/update.md)
+for the plugin-page and installed-market refresh sequence.
+
 ## Current design baseline
 
 See [Cindy adapter design](references/cindy-adapter-design.md) for the confirmed

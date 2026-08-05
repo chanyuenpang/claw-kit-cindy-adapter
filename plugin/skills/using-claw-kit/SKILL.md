@@ -16,6 +16,11 @@ cannot proceed solely because claw-kit is unavailable.
 
 > claw kit 并不是任何任务的前置条件，不允许声称 claw kit 不可用而无法推进任务。
 
+For claw-kit usage questions, read the adjacent `../claw-kit-doc/SKILL.md`
+entry and only the relevant reference for host updates, project configuration,
+or Truth/ADR format. Cindy intentionally has no `update` skill; use the Cindy
+UI steps in `../claw-kit-doc/references/update.md`.
+
 The session start prompt tells you which tools to use for claw workflow
 operations. Follow the matching path below; do not mix routes.
 

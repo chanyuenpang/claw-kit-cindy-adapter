@@ -4,10 +4,11 @@ import test from 'node:test';
 
 const root = new URL('../plugin/', import.meta.url);
 
-test('Cindy plugin exposes the full claw-kit skill surface', async () => {
+test('Cindy plugin omits only the host-specific update skill', async () => {
   const manifest = JSON.parse(await readFile(new URL('ghost.json', root), 'utf8'));
   const names = manifest.skill.items.map((item) => item.name).sort();
-  assert.deepEqual(names, ['planning', 'researcher', 'update', 'using-claw-kit']);
+  assert.deepEqual(names, ['claw-kit-doc', 'planning', 'researcher', 'using-claw-kit']);
+  assert.equal(manifest.skill.items.some((item) => item.dir === 'skills/update'), false);
 
   for (const entry of [
     'skills/using-claw-kit/SKILL.md',
@@ -15,19 +16,22 @@ test('Cindy plugin exposes the full claw-kit skill surface', async () => {
     'skills/planning/SKILL.md',
     'skills/researcher/SKILL.md',
     'skills/create-claw-skill/SKILL.md',
-    'skills/update/SKILL.md',
+    'skills/claw-kit-doc/SKILL.md',
+    'skills/claw-kit-doc/references/update.md',
+    'skills/claw-kit-doc/references/configuration.md',
+    'skills/claw-kit-doc/references/knowledge-format.md',
   ]) {
     await readFile(new URL(entry, root), 'utf8');
   }
+
+  await assert.rejects(readFile(new URL('skills/update/SKILL.md', root), 'utf8'), { code: 'ENOENT' });
 });
 
-test('Cindy marketplace and update contracts are self-contained without archive assets', async () => {
-  const [marketplaceSource, skill, template, fallback, coverage] = await Promise.all([
+test('Cindy marketplace remains source-based and documents the UI update path', async () => {
+  const [marketplaceSource, readme, updateReference] = await Promise.all([
     readFile(new URL('../.agents/plugins/marketplace.json', import.meta.url), 'utf8'),
-    readFile(new URL('skills/update/SKILL.md', root), 'utf8'),
-    readFile(new URL('skills/update/TEMPLATE.json', root), 'utf8'),
-    readFile(new URL('skills/update/non-claw-fallback.md', root), 'utf8'),
-    readFile(new URL('skills/update/CONTENT-COVERAGE.md', root), 'utf8'),
+    readFile(new URL('../README.md', import.meta.url), 'utf8'),
+    readFile(new URL('skills/claw-kit-doc/references/update.md', root), 'utf8'),
   ]);
 
   const marketplace = JSON.parse(marketplaceSource);
@@ -37,16 +41,15 @@ test('Cindy marketplace and update contracts are self-contained without archive 
     entry.source?.path === './plugin'
   ));
 
-  const contract = `${skill}\n${template}\n${fallback}\n${coverage}`;
-  assert.match(contract, /custom (?:Git )?marketplace/i);
-  assert.match(contract, /chanyuenpang\/claw-kit-cindy-adapter/);
-  assert.match(contract, /claw-kit-cindy/);
-  assert.match(skill, /Cindy-owned update implementation/);
-  assert.match(skill, /Each supported platform maintains\s+its own adjacent `update` skill/);
-  assert.match(skill, /shared\s+global CLI together with that platform's plugin/);
-  assert.match(skill, /without a pinned ref/);
-  assert.match(fallback, /legacy manual `claw-kit` install conflicts/);
-  assert.match(skill, /do not\s+download or open a `\.cindy` archive/is);
+  assert.match(readme, /does not expose an `update` Skill/);
+  assert.match(readme, /plugin\/skills\/claw-kit-doc\/references\/update\.md/);
+  assert.match(updateReference, /Open the \*\*Plugins\*\* page/);
+  assert.match(updateReference, /Click \*\*Market\*\* in the upper-right corner/);
+  assert.match(updateReference, /Open \*\*Installed Markets\*\* and refresh/);
+  assert.match(updateReference, /Return to the \*\*Plugins\*\* page/);
+  assert.match(updateReference, /Update \*\*claw-kit\*\*/);
+  assert.match(updateReference, /updates available source metadata/);
+  assert.match(updateReference, /accept\s+the claw-kit update separately/);
 });
 
 test('Cindy release version follows the CLI base rather than an older Cindy tag', async () => {
@@ -91,6 +94,9 @@ test('Cindy omits WUM prompt injection and keeps session-start work asynchronous
   assert.match(skill, /know.*GPT\/Codex.*Shell \+ bridge/is);
   assert.match(skill, /not sure.*Ghost tool/is);
   assert.match(skill, /Use the Ghost tools in this exact order/);
+  assert.match(skill, /\.\.\/claw-kit-doc\/SKILL\.md/);
+  assert.match(skill, /Cindy intentionally has no `update` skill/);
+  assert.match(skill, /\.\.\/claw-kit-doc\/references\/update\.md/);
   assert.match(skill, /Never pass `list_tools` itself as `call_tool\.name`/);
   assert.match(skill, /Host-forged `args\.session_context`/);
   assert.match(skill, /Do not\s+add, reconstruct, or override this field/);
