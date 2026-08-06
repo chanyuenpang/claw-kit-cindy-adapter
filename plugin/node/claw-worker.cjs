@@ -1095,12 +1095,12 @@ rpcInput.on('line', async (line) => {
           });
           return;
         }
-        if (job.finalizeId !== finalizeId || job.host !== 'cindy' || job.writer?.executionPolicy !== 'subagent') {
+        if (job.finalizeId !== finalizeId) {
           reply(request.id, {
             ok: false,
             operation,
             errorCode: 'KNOWLEDGE_JOB_MISMATCH',
-            reason: 'Knowledge finalization job does not belong to this Cindy subagent closeout.',
+            reason: 'Knowledge finalization job does not match the dispatched finalizer.',
           });
           return;
         }
@@ -1163,12 +1163,12 @@ rpcInput.on('line', async (line) => {
           });
           return;
         }
-        if (job.finalizeId !== finalizeId || job.host !== 'cindy') {
+        if (job.finalizeId !== finalizeId) {
           reply(request.id, {
             ok: false,
             operation,
             errorCode: 'KNOWLEDGE_JOB_MISMATCH',
-            reason: 'Knowledge finalization job does not belong to this Cindy closeout.',
+            reason: 'Knowledge finalization job does not match the dispatched finalizer.',
           });
           return;
         }

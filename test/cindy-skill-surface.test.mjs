@@ -49,6 +49,14 @@ test('Cindy marketplace and update contracts are self-contained without archive 
   assert.match(skill, /do not\s+download or open a `\.cindy` archive/is);
 });
 
+test('Cindy release version follows the CLI base rather than an older Cindy tag', async () => {
+  const releasing = await readFile(new URL('../RELEASING.md', import.meta.url), 'utf8');
+  assert.match(releasing, /authorized CLI candidate/);
+  assert.match(releasing, /published `@veewo\/claw` version/);
+  assert.match(releasing, /<cli-base>\.<next-fourth-segment>/);
+  assert.match(releasing, /not a separate three-segment version line/);
+});
+
 test('Cindy omits WUM prompt injection and keeps session-start work asynchronous', async () => {
   const [source, skill, manifestSource, worker] = await Promise.all([
     readFile(new URL('main.js', root), 'utf8'),

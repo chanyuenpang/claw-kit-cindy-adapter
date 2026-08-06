@@ -951,7 +951,7 @@ test("worker captures a final Cindy report through the host-neutral CLI hand-off
   }
 });
 
-test("worker exposes atomic Cindy knowledge claim and done operations without did-turn-end", { skip: process.platform !== "win32" }, async () => {
+test("dispatched Worker claims knowledge atomically without rechecking stale host or policy snapshots", { skip: process.platform !== "win32" }, async () => {
   const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "claw-cindy-atomic-knowledge-"));
   const finalizeId = "c".repeat(64);
   const originatingSessionId = "originating-cindy-session";
@@ -963,11 +963,11 @@ test("worker exposes atomic Cindy knowledge claim and done operations without di
     sessionId: originatingSessionId,
     projectRoot: fixtureDir,
     taskName: "atomic-task",
-    host: "cindy",
+    host: "codex",
     planPath: path.join(fixtureDir, "plan.json"),
     reportPath: path.join(fixtureDir, "plan.report"),
     reportCapture: { mode: "claim", status: "pending" },
-    writer: { executionPolicy: "subagent", externalSkills: [] },
+    writer: { executionPolicy: "background", externalSkills: [] },
     status: "queued",
     attempts: 0,
   }), "utf8");
