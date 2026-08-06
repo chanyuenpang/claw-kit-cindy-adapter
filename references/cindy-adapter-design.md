@@ -70,7 +70,7 @@ The Cindy mapping follows the existing OpenCode adapter's event responsibilities
 
 | Existing claw adapter behavior | Cindy Ghost implementation |
 | --- | --- |
-| session-start `claw hook auto-claw` | `did-session-created` refreshes session state asynchronously without delivering `additionalContext` |
+| session-start `claw context --host cindy` | `did-session-created` refreshes session state asynchronously and projects its structured result without delivering `additionalContext` |
 | OpenCode first-message synthetic context | unsupported in Cindy until the Host provides trusted message context |
 | turn-end plan inspection | no CLI polling; the latest typed command result is the state source |
 | `process.active` continuation | Ghost Hook queues one background `agent.run` continuation after the assistant turn; the `.claw` plan status remains the gate |
@@ -99,7 +99,7 @@ At `did-session-created`, Cindy schedules one zero-delay timer and returns.
 The timer starts background preparation, which runs two operations in
 parallel:
 
-1. Refresh `auto-claw` session state without delivering its `additionalContext`.
+1. Refresh structured `context` session state without delivering it as prompt context.
 2. Run daily cleanup, embedding warmup,
    and retryable knowledge-job discovery.
 
@@ -194,7 +194,7 @@ The first version is accepted only after the complete local loop is verified:
 1. CLI installed: startup context is obtained and injected into the first user
    message.
 2. CLI missing: installation guidance is injected and the session continues.
-3. `auto-claw` failure: an actionable failure is surfaced and the session
+3. `context` refresh failure: an actionable failure is surfaced and the session
    continues.
 4. A bound plan operation returns a structured projection for the Cindy Host.
 5. `process.active`, `process.discussing`, `process.wait`, and `end.*` are
@@ -210,7 +210,7 @@ The first version is accepted only after the complete local loop is verified:
 
 Implemented in the Cindy Ghost plugin package:
 
-- fully asynchronous DSC preparation that runs bounded `auto-claw` diagnostics,
+- fully asynchronous DSC preparation that runs bounded `context` diagnostics,
   cleanup, embedding warmup, and knowledge-job discovery in parallel;
 - WAM-only cache consumption with no Node or CLI request, injecting guidance
   only when non-empty and without a generic claw-kit reminder;

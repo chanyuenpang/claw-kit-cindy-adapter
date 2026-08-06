@@ -713,6 +713,22 @@ function projectionFor(output) {
   return { goal: 'none', planStatus, ...(typeof output.planPath === 'string' ? { planPath: output.planPath } : {}), card };
 }
 
+// Startup context is a host-neutral snapshot. Cindy owns the conversion from
+// that snapshot to its presentation-only workflow card; the CLI does not need
+// to know about Cindy's lifecycle events or card format.
+function projectionForContext(output) {
+  const workflow = output && typeof output.activeWorkflow === 'object'
+    ? output.activeWorkflow
+    : null;
+  if (!workflow || typeof workflow.planStatus !== 'string') return null;
+  return projectionFor({
+    planStatus: workflow.planStatus,
+    planPath: workflow.planPath,
+    plan: workflow.planContent,
+    planSummary: workflow.planSummary,
+  });
+}
+
 // The Agent sees a Cindy workflow contract, never raw CLI/Host integration
 // instructions. The Worker already owns host selection, session binding,
 // command execution, closeout dispatch, and future Goal projection.
@@ -723,7 +739,6 @@ function cindyAgentResult(output) {
     commandHints: rawCommandHints,
     goalMode: _goalMode,
     goalTool: _goalTool,
-    nextsteps: _nextsteps,
     notes: _notes,
     planView: _planView,
     ...result
@@ -840,7 +855,7 @@ rpcInput.on('line', async (line) => {
       return;
     }
     const result = await runClaw(
-      ['hook', 'auto-claw', '--host', 'cindy'],
+      ['context', '--host', 'cindy'],
       params.workdir,
       JSON.stringify({ cwd: params.workdir, session_id: params.sessionId }),
       2000,
@@ -863,7 +878,7 @@ rpcInput.on('line', async (line) => {
     ], params.workdir, undefined, 10000, params.sessionId);
     reply(request.id, {
       ok: true,
-      ...(projectionFor(result.output) ? { projection: projectionFor(result.output) } : {}),
+      ...(projectionForContext(result.output) ? { projection: projectionForContext(result.output) } : {}),
       ...(Array.isArray(reconciliation.output?.jobs) ? { knowledgeJobs: reconciliation.output.jobs } : {}),
     });
     return;

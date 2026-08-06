@@ -69,7 +69,8 @@ test('Cindy omits WUM prompt injection and keeps session-start work asynchronous
   assert.match(source, /refreshSessionStart/);
   assert.match(source, /claw\/session-start/);
   assert.match(worker, /claw\/session-start/);
-  assert.match(worker, /hook', 'auto-claw/);
+  assert.match(worker, /'context', '--host', 'cindy'/);
+  assert.match(worker, /function projectionForContext/);
   assert.deepEqual(manifest.subscribe.topics, ['session', 'turn']);
   assert.match(source, /runSessionMaintenance/);
   assert.match(source, /claw\/session-background/);

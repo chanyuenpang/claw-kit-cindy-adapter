@@ -707,7 +707,8 @@ test("worker wraps the user-installed claw launcher with Cindy host and session 
     assert.equal("goalMode" in response.result.result, false);
     assert.equal("goalTool" in response.result.result, false);
     assert.equal("commandHints" in response.result.result, false);
-    assert.equal("nextsteps" in response.result.result, false);
+    assert.equal(Array.isArray(response.result.result.nextsteps), true);
+    assert.deepEqual(response.result.result.nextsteps, ["Run claw plan sync"]);
     assert.equal("notes" in response.result.result, false);
     assert.deepEqual(response.result.result.guidance, {
       nextStep: "Work on the current plan task, then record its completion through claw-kit tools.",

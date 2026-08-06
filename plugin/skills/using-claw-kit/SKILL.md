@@ -46,6 +46,12 @@ executed by the Orca Agent in Cindy. The job already exists durably when the
 terminal mutation returns; neither dispatch nor report capture waits for a Stop
 hook.
 
+**Orca discovery is required.** When `knowledgeDispatch` is present, dispatch
+it through Cindy Orca. If `cindy_orca` is absent from a static tool list,
+discover `mcp__cindy_orca__*` from `ALL_TOOLS`, then call
+`get_workspace_info`. Only an actual Orca call failure makes dispatch
+unavailable; never substitute shell, background work, or an unsupported claim.
+
 1. Call `cindy_orca.get_workspace_info` and look for a Worker with the stable
    label `knowledge-finalizer`.
 2. If no active workflow exists, call `cindy_orca.start_team`, then create the
