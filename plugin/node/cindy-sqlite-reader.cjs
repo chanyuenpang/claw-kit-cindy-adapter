@@ -46,6 +46,53 @@ function isTaskCompletionToolUse(value) {
     || (operation === 'task.edit' && value.input?.args?.args?.status === 'done');
 }
 
+function isPlanCreateToolUse(value) {
+  return Boolean(
+    value
+    && typeof value === 'object'
+    && !Array.isArray(value)
+    && value.toolName === 'mcp__cindy__ghost_call'
+    && value.input?.tool === 'call_tool'
+    && value.input?.args?.name === 'plan.create',
+  );
+}
+
+function isSuccessfulPlanCreateResult(row, planCreateToolUseIds) {
+  if (!row.tool_use_id || !planCreateToolUseIds.has(row.tool_use_id)) return false;
+  const content = readJsonContent(row.content);
+  return Boolean(
+    content
+    && typeof content === 'object'
+    && !Array.isArray(content)
+    && content.ok === true
+    && (!content.result || typeof content.result !== 'object' || content.result.ok !== false),
+  );
+}
+
+function readPlanPath(value) {
+  if (!value || typeof value !== 'object') return '';
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = readPlanPath(item);
+      if (found) return found;
+    }
+    return '';
+  }
+  if (typeof value.planPath === 'string' && value.planPath.trim()) return value.planPath.trim();
+  for (const item of Object.values(value)) {
+    const found = readPlanPath(item);
+    if (found) return found;
+  }
+  return '';
+}
+
+function isNewPlanCreateResult(row, planCreateToolUseIds, planPath, projectRoot) {
+  if (!isSuccessfulPlanCreateResult(row, planCreateToolUseIds)) return false;
+  const createdPlanPath = readPlanPath(readJsonContent(row.content));
+  if (!createdPlanPath || !planPath) return true;
+  return comparablePath(path.resolve(projectRoot || process.cwd(), createdPlanPath)) !== comparablePath(path.resolve(planPath));
+}
+
 function taskCompletionToolMessage(value) {
   if (!isTaskCompletionToolUse(value) || value.input?.args?.name !== 'task.edit') return '';
   const detail = value.input?.args?.args?.detail;
@@ -117,15 +164,6 @@ function readSessionMessages(db, sessionId) {
     WHERE session_id = ? AND rewind_at IS NULL
     ORDER BY created_at ASC, rowid ASC
   `).all(sessionId);
-}
-
-function containsKnowledgeDispatch(value, finalizeId) {
-  if (!value || typeof value !== 'object') return false;
-  if (Array.isArray(value)) return value.some((item) => containsKnowledgeDispatch(item, finalizeId));
-  if (value.knowledgeDispatch?.policy === 'subagent' && value.knowledgeDispatch?.finalizeId === finalizeId) {
-    return true;
-  }
-  return Object.values(value).some((item) => containsKnowledgeDispatch(item, finalizeId));
 }
 
 function nonEmptyString(value) {
@@ -410,7 +448,7 @@ async function readTurnCaptureWithRetry(sessionId) {
   return null;
 }
 
-function readKnowledgeClaimCapture(sessionId, finalizeId, startedAt) {
+function readKnowledgeClaimCapture(sessionId, finalizeId, startedAt, planPath, projectRoot) {
   if (!sessionId || !/^[a-f0-9]{64}$/i.test(finalizeId || '')) return null;
   const match = findDatabaseForSession(sessionId);
   if (!match) return null;
@@ -429,6 +467,7 @@ function readKnowledgeClaimCapture(sessionId, finalizeId, startedAt) {
     const seen = new Set();
     const taskCompletionToolUseIds = new Set();
     const taskCompletionToolMessages = new Map();
+    const planCreateToolUseIds = new Set();
     for (const row of rows) {
       if (row.role === 'assistant') {
         const text = messageText(row.content);
@@ -444,10 +483,11 @@ function readKnowledgeClaimCapture(sessionId, finalizeId, startedAt) {
           taskCompletionToolUseIds.add(row.tool_use_id);
           taskCompletionToolMessages.set(row.tool_use_id, taskCompletionToolMessage(toolUse));
         }
+        if (row.tool_use_id && isPlanCreateToolUse(toolUse)) planCreateToolUseIds.add(row.tool_use_id);
         continue;
       }
       if (row.role !== 'tool_result') continue;
-      const content = readJsonContent(row.content);
+      if (isNewPlanCreateResult(row, planCreateToolUseIds, planPath, projectRoot)) break;
       if (isSuccessfulTaskCompletionResult(row, taskCompletionToolUseIds)) {
         const message = taskCompletionToolMessages.get(row.tool_use_id) || latestAssistant;
         const key = `${latestTurnId}\n${message}`;
@@ -456,15 +496,12 @@ function readKnowledgeClaimCapture(sessionId, finalizeId, startedAt) {
           conclusions.push({ turnId: latestTurnId, message });
         }
       }
-      if (containsKnowledgeDispatch(content, finalizeId)) {
-        return {
-          sessionId,
-          turnId: String(row.client_id || latestTurnId || row.id || `row-${row.rowid}`),
-          taskConclusions: conclusions,
-        };
-      }
     }
-    return null;
+    return {
+      sessionId,
+      turnId: latestTurnId || String(rows.at(-1)?.client_id || rows.at(-1)?.id || 'claim'),
+      taskConclusions: conclusions,
+    };
   } catch {
     return null;
   } finally {
@@ -472,20 +509,15 @@ function readKnowledgeClaimCapture(sessionId, finalizeId, startedAt) {
   }
 }
 
-async function readKnowledgeClaimCaptureWithRetry(sessionId, finalizeId, startedAt) {
-  const delays = [0, 50, 100, 250, 500, 1000, 2000];
-  for (const delay of delays) {
-    if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
-    const capture = readKnowledgeClaimCapture(sessionId, finalizeId, startedAt);
-    if (capture) return capture;
-  }
-  return null;
+async function readKnowledgeClaimCaptureAfterDelay(sessionId, finalizeId, startedAt, planPath, projectRoot) {
+  await new Promise((resolve) => setTimeout(resolve, 10_000));
+  return readKnowledgeClaimCapture(sessionId, finalizeId, startedAt, planPath, projectRoot);
 }
 
 module.exports = {
   candidateUserDataDirs,
   readKnowledgeClaimCapture,
-  readKnowledgeClaimCaptureWithRetry,
+  readKnowledgeClaimCaptureAfterDelay,
   readTurnCapture,
   readTurnCaptureWithRetry,
   resolveCindySessionContext,

@@ -8,6 +8,14 @@ description: "Use first whenever the claw-kit Cindy plugin is enabled or its sta
 Use this skill first whenever the claw-kit Cindy plugin is enabled or the Cindy
 start prompt identifies a claw-kit workflow.
 
+## Availability boundary
+
+If claw-kit, its CLI, Ghost tools, or workflow bridge is unavailable, skip
+claw-kit and continue the user's task directly. Do not claim that the task
+cannot proceed solely because claw-kit is unavailable.
+
+> claw kit 并不是任何任务的前置条件，不允许声称 claw kit 不可用而无法推进任务。
+
 The session start prompt tells you which tools to use for claw workflow
 operations. Follow the matching path below; do not mix routes.
 
@@ -95,7 +103,8 @@ are not launched.
 ### Session entry
 
 1. Read the workflow snapshot injected by the Cindy Host at session start.
-2. If the Host reports that claw is unavailable, surface its diagnosis and continue.
+2. If the Host reports that claw is unavailable, surface its diagnosis, skip
+   claw-kit, and continue the user's task directly.
 3. When an active session-bound plan is recovered, continue that plan before starting unrelated work.
 
 ### Planning and execution
@@ -143,7 +152,9 @@ async function runClawPlanMutation({ argv, workdir, timeout_ms = 30000 }) {
 
 - Strongly prefer running plan mutations through the code-mode bridge.
 - Edit canonical plan state only through claw commands supplied by returned guidance.
-- If code mode or the driver is unavailable, stop with the program error; no direct-call fallback.
+- If code mode or the driver is unavailable, skip the claw workflow and
+  continue the user's task directly; do not substitute an unsupported plan
+  mutation.
 - Keep claw harness mechanics out of normal thread replies.
 
 ### Completion
@@ -175,7 +186,8 @@ When all plan tasks are complete:
 1. Read the workflow snapshot injected by the Cindy Host at session start (or
    after Host-managed compact recovery).
 2. If the Host reports that claw is unavailable, surface its actionable
-   diagnosis and continue without pretending that recovery succeeded.
+   diagnosis, skip claw-kit, and continue the user's task directly without
+   pretending that recovery succeeded.
 3. When an active session-bound plan is recovered, continue that plan before
    starting unrelated work.
 

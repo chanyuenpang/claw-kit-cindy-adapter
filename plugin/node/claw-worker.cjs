@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const {
   candidateUserDataDirs,
-  readKnowledgeClaimCaptureWithRetry,
+  readKnowledgeClaimCaptureAfterDelay,
   readTurnCaptureWithRetry,
   resolveCindySessionContext,
 } = require('./cindy-sqlite-reader.cjs');
@@ -1104,17 +1104,19 @@ rpcInput.on('line', async (line) => {
           });
           return;
         }
-        const capture = await readKnowledgeClaimCaptureWithRetry(
+        const capture = await readKnowledgeClaimCaptureAfterDelay(
           job.sessionId,
           finalizeId,
           job.reportCapture?.startedAt,
+          job.planPath,
+          job.projectRoot,
         );
         if (!capture) {
           reply(request.id, {
             ok: false,
             operation,
             errorCode: 'CINDY_REPORT_NOT_PERSISTED',
-            reason: 'The originating Cindy plan completion has not been persisted yet; retry knowledge.claim.',
+            reason: 'The originating Cindy session records were unavailable after the required capture delay; retry knowledge.claim.',
           });
           return;
         }

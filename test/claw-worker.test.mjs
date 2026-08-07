@@ -120,13 +120,13 @@ test("Cindy SQLite reader extracts task conclusions from the current session", (
   }
 });
 
-function requestWorker(child, request) {
+function requestWorker(child, request, timeoutMs = 2_000) {
   return new Promise((resolve, reject) => {
     let stdout = "";
     let stderr = "";
     const timer = setTimeout(() => {
       reject(new Error(`worker did not reply\nstderr:\n${stderr}`));
-    }, 2_000);
+    }, timeoutMs);
 
     child.stdout.on("data", (chunk) => {
       stdout += String(chunk);
@@ -175,7 +175,7 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
   );
 }
 
-test("Cindy SQLite reader prepares subagent report input as soon as knowledgeDispatch is persisted", () => {
+test("Cindy SQLite reader captures task conclusions without waiting for knowledgeDispatch persistence", () => {
   const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "claw-cindy-claim-capture-"));
   const dbPath = path.join(fixtureDir, "cindy-reader.db");
   const finalizeId = "b".repeat(64);
@@ -201,14 +201,17 @@ test("Cindy SQLite reader prepares subagent report input as soon as knowledgeDis
     }), "call-task-edit-done", 2);
   db.prepare("INSERT INTO messages (id, client_id, session_id, role, content, tool_use_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
     .run("task-result", "turn-1", "originating-cindy-session", "tool_result", JSON.stringify({ ok: true, result: { planStatus: "process.active", completedTaskIds: [2] } }), "call-task-edit-done", 3);
+  db.prepare("INSERT INTO messages (id, client_id, session_id, role, content, tool_use_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+    .run("new-plan-use", "turn-2", "originating-cindy-session", "tool_use", JSON.stringify({
+      toolName: "mcp__cindy__ghost_call",
+      input: { tool: "call_tool", args: { name: "plan.create", args: { title: "next plan" } } },
+    }), "call-plan-create", 4);
+  db.prepare("INSERT INTO messages (id, client_id, session_id, role, content, tool_use_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+    .run("new-plan-result", "turn-2", "originating-cindy-session", "tool_result", JSON.stringify({ ok: true, result: { planPath: "next-plan.json" } }), "call-plan-create", 5);
   db.prepare("INSERT INTO messages (id, client_id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?, ?)")
-    .run("assistant-2", "turn-1", "originating-cindy-session", "assistant", JSON.stringify("Closed the plan and dispatched the writer."), 4);
-  db.prepare("INSERT INTO messages (id, client_id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?, ?)")
-    .run("plan-result", "turn-1", "originating-cindy-session", "tool_result", JSON.stringify({ ok: true, result: { knowledgeDispatch: { policy: "subagent", finalizeId } } }), 5);
+    .run("next-task-result", "turn-2", "originating-cindy-session", "tool_result", JSON.stringify({ ok: true, command: "task.done" }), 6);
   db.prepare("INSERT INTO messages (id, client_id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?, ?)")
     .run("empty-assistant", "empty-turn", "empty-cindy-session", "assistant", JSON.stringify("Closed a plan without a task conclusion."), 1);
-  db.prepare("INSERT INTO messages (id, client_id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?, ?)")
-    .run("empty-plan-result", "empty-turn", "empty-cindy-session", "tool_result", JSON.stringify({ ok: true, result: { knowledgeDispatch: { policy: "subagent", finalizeId: emptyFinalizeId } } }), 2);
   db.close();
 
   const previous = process.env.CINDY_USER_DATA;
@@ -1031,7 +1034,7 @@ process.exit(2);
         sessionId: "knowledge-finalizer-worker",
         workdir: fixtureDir,
       },
-    });
+    }, 12_000);
     assert.equal(claim.result.ok, true);
     assert.equal(claim.result.result.claimed, true);
     assert.equal(claim.result.result.claimToken, "claim-atomic");
