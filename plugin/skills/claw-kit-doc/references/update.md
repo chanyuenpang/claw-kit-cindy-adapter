@@ -6,6 +6,7 @@ loaded adapter already proves the host.
 If claw-kit is unavailable, skip its workflow and continue the requested update
 through the host's direct update route. It is never a prerequisite for making
 progress on a task.
+
 ## Codex
 
 Use the Codex adapter's namespaced `update` skill for an authorized update. It
