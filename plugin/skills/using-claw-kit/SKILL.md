@@ -49,6 +49,10 @@ mutation never returns a `knowledgeDispatch`; finish normally without creating
 or messaging an Orca Worker, calling `knowledge.claim`, or entering any other
 knowledge-finalization flow.
 
+For session-scoped plans, complete directly with `plan.done` / `claw plan done`.
+Do not request or write a retrospective or key decision. Project-scoped plans
+retain the retrospective and durable-decision closeout contract.
+
 This section applies to both execution routes. Cindy has one knowledge-closeout
 execution model: a persistent, UI-visible Orca Worker. When a terminal plan
 mutation returns a valid `knowledgeDispatch`, dispatch that Worker directly.

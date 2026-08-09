@@ -72,12 +72,12 @@ const OPERATION_CATALOG = {
     },
     {
       name: 'plan.done',
-      description: 'Complete the current plan and save its retrospective.',
+      description: 'Complete the current plan. Project-scoped plans require a retrospective; session-scoped plans do not persist project documentation.',
       mutates: true,
       parameters: objectParameters({
-        retrospective: { type: 'string', description: 'Required retrospective summary.' },
-        keyDecision: stringParameter('Optional durable decision.'),
-      }, ['retrospective']),
+        retrospective: { type: 'string', description: 'Retrospective summary, required for project-scoped plans.' },
+        keyDecision: stringParameter('Optional durable decision for a project-scoped plan.'),
+      }),
     },
   ],
   task: [
@@ -405,7 +405,7 @@ function sessionRequest(name, args) {
       return { operation: name, input: { operations } };
     }
     case 'plan.done': return { operation: name, input: {
-      retrospectiveSummary: requiredString(args, 'retrospective'),
+      ...(typeof args.retrospective === 'string' ? { retrospectiveSummary: args.retrospective } : {}),
       ...(typeof args.keyDecision === 'string' ? { keyDecisions: [args.keyDecision] } : {}),
     } };
     case 'task.add': return { operation: name, input: { tasks: [{ title: requiredString(args, 'title'), ...(typeof args.detail === 'string' ? { detail: args.detail } : {}) }] } };
@@ -586,7 +586,8 @@ function operationCommand(name, args) {
       return command;
     }
     case 'plan.done': {
-      const command = ['plan', 'done', '--retrospective', requiredString(args, 'retrospective')];
+      const command = ['plan', 'done'];
+      appendOption(command, '--retrospective', args.retrospective);
       appendOption(command, '--key-decision', args.keyDecision);
       return command;
     }
@@ -789,7 +790,7 @@ function commandHintToWorkerInstruction(hint, nextTask) {
     return instruction('plan.start', {}, 'Start the current plan after supplying any required planning fields.');
   }
   if (/^claw plan done\b/.test(normalized)) {
-    return instruction('plan.done', {}, 'Complete the plan after providing its retrospective.', ['retrospective']);
+    return instruction('plan.done', {}, 'Complete the plan. A retrospective is required only for project-scoped plans.');
   }
   if (/^claw task done\b/.test(normalized)) {
     const id = normalized.match(/--id\s+(\d+)/)?.[1];
