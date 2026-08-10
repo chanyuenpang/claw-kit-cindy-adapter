@@ -62,6 +62,34 @@ test("Cindy tool dispatch preserves Node broker failures with an exact reason", 
   assert.match(source, /CLAW_TOOL_DISPATCH_FAILED/);
 });
 
+test("Cindy catalog reveals explicit session scope only for a known workspace without .claw", async () => {
+  const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "claw-cindy-catalog-"));
+  const projectDir = path.join(fixtureDir, "project");
+  const scratchDir = path.join(fixtureDir, "scratch");
+  fs.mkdirSync(path.join(projectDir, ".claw"), { recursive: true });
+  fs.writeFileSync(path.join(projectDir, ".claw", "project.json"), "{}", "utf8");
+  fs.mkdirSync(scratchDir, { recursive: true });
+  const child = spawn(process.execPath, [workerPath], { cwd: fixtureDir, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+  const scopeParameter = (response) => response.result.categories
+    .find((category) => category.name === "plan").operations
+    .find((operation) => operation.name === "plan.create").parameters.properties.scope;
+  try {
+    const unknown = await requestWorker(child, { jsonrpc: "2.0", id: 31, method: "claw/catalog", params: {} });
+    const project = await requestWorker(child, { jsonrpc: "2.0", id: 32, method: "claw/catalog", params: { workdir: projectDir } });
+    const scratch = await requestWorker(child, { jsonrpc: "2.0", id: 33, method: "claw/catalog", params: { workdir: scratchDir } });
+    assert.equal(scopeParameter(unknown), undefined);
+    assert.equal(scopeParameter(project), undefined);
+    assert.deepEqual(scopeParameter(scratch), {
+      type: "string",
+      enum: ["session"],
+      description: "Only for isolated work outside a .claw project after choosing the session route.",
+    });
+  } finally {
+    await stopWorker(child);
+    fs.rmSync(fixtureDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  }
+});
+
 test("Cindy writer gateway treats the persisted job as its durable supervisor state", () => {
   const source = fs.readFileSync(workerPath, "utf8");
   assert.match(source, /'knowledge', 'wait'/);
@@ -697,14 +725,10 @@ test("worker wraps the user-installed claw launcher with Cindy host and session 
 
     assert.equal(response.result.ok, true);
     assert.equal(response.result.operation, "plan.start");
-    assert.equal(response.result.result.sessionId, "cindy-session");
-    assert.deepEqual(response.result.result.request, {
-      operation: 'plan.start',
-      input: {
-        updates: { requirementsSummary: 'verify-card', acceptanceCriteria: ['shows-progress'] },
-        appendTasks: [{ title: 'review-card', detail: 'inspect-projection' }],
-      },
-    });
+    assert.equal(response.result.result.stage, 'execution');
+    assert.equal('sessionId' in response.result.result, false);
+    assert.equal('request' in response.result.result, false);
+    assert.equal('planView' in response.result.result, false);
     assert.deepEqual(response.result.postCommitEffects, [{ type: 'projection.refresh' }]);
     assert.equal("hostActions" in response.result.result, false);
     assert.equal("goalMode" in response.result.result, false);
@@ -715,7 +739,6 @@ test("worker wraps the user-installed claw launcher with Cindy host and session 
     assert.equal("notes" in response.result.result, false);
     assert.deepEqual(response.result.result.guidance, {
       nextStep: "Work on the current plan task, then record its completion through claw-kit tools.",
-      nextTask: { id: 1, title: "Implement gateway", status: "pending" },
       commandHints: [{
         tool: "call_tool",
         arguments: { name: "task.done", args: { id: 1 } },

@@ -458,7 +458,7 @@ function toolFailure(callId, reason, errorCode = 'CLAW_OPERATION_FAILED') {
 
 async function dispatchToolCall(msg) {
   if (msg.tool === 'list_tools') {
-    const catalog = await nodeRequest('claw/catalog', {});
+    const catalog = await nodeRequest('claw/catalog', { workdir: msg.args?.session_context?.workdir });
     if (!catalog?.categories) {
       toolFailure(
         msg.callId,

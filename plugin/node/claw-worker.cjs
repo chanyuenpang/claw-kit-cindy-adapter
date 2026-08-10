@@ -38,7 +38,6 @@ const OPERATION_CATALOG = {
         properties: {
           title: { type: 'string', description: 'Plan title.' },
           goal: { type: 'string', description: 'Optional plan goal.' },
-          scope: { type: 'string', enum: ['project', 'session'], description: 'Optional plan scope.' },
           template: { type: 'string', description: 'Optional template name.' },
           templateFile: { type: 'string', description: 'Optional template file path.' },
         },
@@ -153,6 +152,23 @@ const OPERATIONS = new Map([...Object.values(OPERATION_CATALOG).flat(), ...PRIVA
 
 function stringParameter(description) {
   return { type: 'string', description };
+}
+
+function hasClawProject(workdir) {
+  if (typeof workdir !== 'string' || !workdir.trim()) return false;
+  return fs.existsSync(path.join(path.resolve(workdir), '.claw', 'project.json'));
+}
+
+function catalogForWorkdir(workdir) {
+  const categories = structuredClone(OPERATION_CATALOG);
+  if (typeof workdir === 'string' && workdir.trim() && !hasClawProject(workdir)) {
+    const create = categories.plan.find((operation) => operation.name === 'plan.create');
+    create.parameters.properties.scope = {
+      type: 'string', enum: ['session'],
+      description: 'Only for isolated work outside a .claw project after choosing the session route.',
+    };
+  }
+  return categories;
 }
 
 function objectParameters(properties, required = []) {
@@ -373,12 +389,12 @@ async function shutdownWorker() {
 process.on('SIGINT', () => { void shutdownWorker(); });
 process.on('SIGTERM', () => { void shutdownWorker(); });
 
-function sessionRequest(name, args) {
+function sessionRequest(name, args, workdir) {
   switch (name) {
     case 'plan.create': return { operation: name, input: {
       title: requiredString(args, 'title'),
       ...(typeof args.goal === 'string' ? { goalText: args.goal } : {}),
-      ...(args.scope === 'project' || args.scope === 'session' ? { scope: args.scope } : {}),
+      ...(args.scope === 'session' ? { scope: 'session' } : {}),
       ...(typeof args.template === 'string' ? { templateName: args.template } : {}),
       ...(typeof args.templateFile === 'string' ? { templateFile: path.resolve(args.templateFile) } : {}),
     } };
@@ -733,22 +749,61 @@ function projectionForContext(output) {
 // The Agent sees a Cindy workflow contract, never raw CLI/Host integration
 // instructions. The Worker already owns host selection, session binding,
 // command execution, closeout dispatch, and future Goal projection.
-function cindyAgentResult(output) {
+function cindyAgentResult(output, operation) {
   if (!output || typeof output !== 'object') return output;
-  const {
-    hostActions: _hostActions,
-    commandHints: rawCommandHints,
-    goalMode: _goalMode,
-    goalTool: _goalTool,
-    notes: _notes,
-    planView: _planView,
-    ...result
-  } = output;
+  if (operation === 'search') {
+    return { results: Array.isArray(output.results) ? output.results : [] };
+  }
+  if (operation === 'knowledge.claim') {
+    return {
+      ...(output.claimed === true ? { claimed: true } : {}),
+      ...(typeof output.finalizeId === 'string' ? { finalizeId: output.finalizeId } : {}),
+      ...(typeof output.claimToken === 'string' ? { claimToken: output.claimToken } : {}),
+      ...(Array.isArray(output.assignments) ? { assignments: output.assignments } : {}),
+      ...(typeof output.templatePath === 'string' ? { templatePath: output.templatePath } : {}),
+    };
+  }
+  if (operation === 'knowledge.done') {
+    return {
+      ...(typeof output.finalizeId === 'string' ? { finalizeId: output.finalizeId } : {}),
+      ...(typeof output.status === 'string' ? { status: output.status } : {}),
+      ...(output.completed === true ? { completed: true } : {}),
+    };
+  }
+  if (operation === 'plan.show') {
+    const plan = output.plan && typeof output.plan === 'object' ? output.plan : {};
+    const planStatus = typeof plan.status === 'string' ? plan.status : '';
+    const stage = ({ 'prepare.requirements': 'discussion', 'prepare.review': 'discussion', 'process.discussing': 'discussion', 'process.active': 'execution', 'process.wait': 'paused', 'end.completed': 'done', 'end.closed': 'closed', 'end.leave': 'left' }[planStatus]);
+    return {
+      ...(stage ? { stage } : {}),
+      ...(typeof output.simplePlanView?.summary === 'string' ? { planSummary: output.simplePlanView.summary } : {}),
+    };
+  }
   const planStatus = typeof output.planStatus === 'string' ? output.planStatus : '';
+  if (!planStatus && !output.workflowGuidance && !output.nextsteps) return output;
   const nextTask = output.nextTask && typeof output.nextTask === 'object' ? output.nextTask : undefined;
   const askUser = output.askUser && typeof output.askUser === 'object' ? output.askUser : undefined;
-  const guidance = cindyGuidance(planStatus, nextTask, askUser, rawCommandHints);
-  return { ...result, ...(guidance ? { guidance } : {}) };
+  const workflowGuidance = output.workflowGuidance && typeof output.workflowGuidance === 'object'
+    ? output.workflowGuidance
+    : {};
+  const stage = typeof workflowGuidance.stage === 'string'
+    ? workflowGuidance.stage
+    : ({ 'prepare.requirements': 'discussion', 'prepare.review': 'discussion', 'process.discussing': 'discussion', 'process.active': 'execution', 'process.wait': 'paused', 'end.completed': 'done', 'end.closed': 'closed', 'end.leave': 'left' }[planStatus]);
+  const rawNextsteps = Array.isArray(workflowGuidance.nextsteps) ? workflowGuidance.nextsteps : output.nextsteps;
+  const nextsteps = Array.isArray(rawNextsteps)
+    ? rawNextsteps.filter((step) => typeof step === 'string')
+    : [];
+  const guidance = cindyGuidance(planStatus, nextTask, askUser, workflowGuidance.commandHints ?? output.commandHints);
+  return {
+    ...(stage ? { stage } : {}),
+    ...(operation === 'task.done' ? { ok: true, command: operation } : {}),
+    ...(operation === 'plan.done' && typeof output.planPath === 'string' ? { planPath: output.planPath } : {}),
+    ...(output.achievement && typeof output.achievement === 'object' ? { achievement: output.achievement } : {}),
+    ...(nextsteps.length ? { nextsteps } : {}),
+    ...(nextTask ? { nextTask } : {}),
+    ...(askUser ? { askUser } : {}),
+    ...(guidance ? { guidance } : {}),
+  };
 }
 
 function cindyGuidance(planStatus, nextTask, askUser, rawCommandHints) {
@@ -768,8 +823,6 @@ function cindyGuidance(planStatus, nextTask, askUser, rawCommandHints) {
   if (!nextStep && !nextTask && !askUser && commandHints.length === 0) return null;
   return {
     ...(nextStep ? { nextStep } : {}),
-    ...(nextTask ? { nextTask } : {}),
-    ...(askUser ? { askUser } : {}),
     ...(commandHints.length ? { commandHints } : {}),
   };
 }
@@ -828,7 +881,8 @@ rpcInput.on('line', async (line) => {
   try { request = JSON.parse(line); } catch { return; }
   const params = request.params || {};
   if (request.method === 'claw/catalog') {
-    reply(request.id, { categories: Object.entries(OPERATION_CATALOG).map(([name, operations]) => ({ name, operations })) });
+    const catalog = catalogForWorkdir(params.workdir);
+    reply(request.id, { categories: Object.entries(catalog).map(([name, operations]) => ({ name, operations })) });
     return;
   }
   if (request.method === 'claw/resolve-session-context') {
@@ -1231,7 +1285,7 @@ rpcInput.on('line', async (line) => {
         output = result.output;
       } else {
         const session = await ensureSession(params.sessionId, params.workdir);
-        const response = await session.request(sessionRequest(operation, operationArgs));
+        const response = await session.request(sessionRequest(operation, operationArgs, params.workdir));
         output = response.output;
         envelope = {
           ...(Array.isArray(response.hostActions) ? { hostActions: response.hostActions } : {}),
@@ -1242,7 +1296,7 @@ rpcInput.on('line', async (line) => {
       reply(request.id, {
         ok: true,
         operation,
-        result: cindyAgentResult(output),
+        result: cindyAgentResult(output, operation),
         ...(projectionFor(output) ? { projection: projectionFor(output) } : {}),
         ...envelope,
       });
