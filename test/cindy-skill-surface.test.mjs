@@ -101,9 +101,9 @@ test('Cindy omits WUM prompt injection and keeps session-start work asynchronous
   assert.match(skill, /Host-forged `args\.session_context`/);
   assert.match(skill, /Do not\s+add, reconstruct, or override this field/);
   assert.match(skill, /knowledgeDispatch/);
-  assert.match(skill, /Session scope is temporary and does not persist project knowledge/);
-  assert.match(skill, /never returns a `knowledgeDispatch`/);
-  assert.match(skill, /finish normally without creating\s+or messaging an Orca Worker/);
+  assert.match(skill, /If the terminal result contains a `knowledgeDispatch`/);
+  assert.doesNotMatch(skill, /Session scope is temporary/);
+  assert.doesNotMatch(skill, /Project-scoped plans/);
   assert.match(skill, /cindy_orca\.get_workspace_info/);
   assert.match(skill, /cindy_orca\.start_team/);
   assert.match(skill, /cindy_orca\.create_worker/);

@@ -21,8 +21,17 @@ entry and only the relevant reference for host updates, project configuration,
 or Truth/ADR format. Cindy intentionally has no `update` skill; use the Cindy
 UI steps in `../claw-kit-doc/references/update.md`.
 
-The session start prompt tells you which tools to use for claw workflow
-operations. Follow the matching path below; do not mix routes.
+Choose the execution route from runtime instructions. Use the session-start
+prompt only as workflow context; do not use it to infer the route. Do not mix
+routes.
+
+## Planning stance
+
+Treat Claw-kit as an assistive workflow tool. Use plans and tasks to focus
+attention, coordinate work, and preserve progress; do not treat them as
+immutable authority. Adjust the goal, scope, and task breakdown promptly when
+user needs or new evidence require it. When an independently manageable scope
+would keep expanding a parent task, create a subplan instead.
 
 ## Route detection
 
@@ -43,15 +52,6 @@ model, effort, and asynchronous completion semantics directly to the Orca Agent
 lifecycle.
 
 ## Knowledge finalizer dispatch
-
-Session scope is temporary and does not persist project knowledge. Its terminal
-mutation never returns a `knowledgeDispatch`; finish normally without creating
-or messaging an Orca Worker, calling `knowledge.claim`, or entering any other
-knowledge-finalization flow.
-
-For session-scoped plans, complete directly with `plan.done` / `claw plan done`.
-Do not request or write a retrospective or key decision. Project-scoped plans
-retain the retrospective and durable-decision closeout contract.
 
 This section applies to both execution routes. Cindy has one knowledge-closeout
 execution model: a persistent, UI-visible Orca Worker. When a terminal plan
@@ -114,24 +114,23 @@ are not launched.
 1. Read the workflow snapshot injected by the Cindy Host at session start.
 2. If the Host reports that claw is unavailable, surface its diagnosis, skip
    claw-kit, and continue the user's task directly.
-3. When an active session-bound plan is recovered, continue that plan before starting unrelated work.
+3. When an active session-bound plan is recovered, continue it unless the
+   current user request explicitly changes, replaces, or cancels its goal.
+   Record that revision through the supported workflow before proceeding.
 
 ### Planning and execution
 
 - Follow the returned `workflowGuidance` as the only lifecycle contract. Use its stage and
   current task to determine the current work; `commandHints` are command lookup aids.
-- A plan is the task container, not a frozen script: adapt requirements, scope, and tasks
-  to new user needs.
 - `process.discussing`: clarify requirements and do not implement prematurely.
 - `process.active`: execute one plan task at a time and keep plan state current.
 - `process.wait`: stop until the user or dependency resumes the workflow.
 - `end.*`: perform the required closeout and do not auto-continue.
-- For a complex sub-task, prefer `claw subplan create` to hand it off.
 
 ### Code-mode bridge for plan mutations
 
-For every claw plan mutation, run this function in code mode. Change only `command`, `workdir`,
-and `timeout_ms`:
+For every supported claw plan mutation, run this function in code mode. Change
+only `argv`, `workdir`, and `timeout_ms`; do not modify the bridge itself:
 
 ```javascript
 async function runClawPlanMutation({ argv, workdir, timeout_ms = 30000 }) {
@@ -159,7 +158,7 @@ async function runClawPlanMutation({ argv, workdir, timeout_ms = 30000 }) {
 
 ### Hard boundaries
 
-- Strongly prefer running plan mutations through the code-mode bridge.
+- Run every supported plan mutation through the code-mode bridge.
 - Edit canonical plan state only through claw commands supplied by returned guidance.
 - If code mode or the driver is unavailable, skip the claw workflow and
   continue the user's task directly; do not substitute an unsupported plan
@@ -171,8 +170,8 @@ async function runClawPlanMutation({ argv, workdir, timeout_ms = 30000 }) {
 When all plan tasks are complete:
 
 1. Complete the canonical plan transition through the bridge.
-2. If the result contains a `knowledgeDispatch`, dispatch it through the Orca
-   flow above before returning the normal final response.
+2. If the terminal result contains a `knowledgeDispatch`, dispatch it through
+   the Orca flow above before returning the normal final response.
 3. Do not wait for a Stop hook or for the Writer to finish. Once dispatch is
    accepted, return the main reply immediately without polling or reading the
    Worker.
@@ -197,8 +196,9 @@ When all plan tasks are complete:
 2. If the Host reports that claw is unavailable, surface its actionable
    diagnosis, skip claw-kit, and continue the user's task directly without
    pretending that recovery succeeded.
-3. When an active session-bound plan is recovered, continue that plan before
-   starting unrelated work.
+3. When an active session-bound plan is recovered, continue it unless the
+   current user request explicitly changes, replaces, or cancels its goal.
+   Record that revision through the supported workflow before proceeding.
 
 Only the Host invokes `claw context`, and only for session start or compact
 recovery. It is never a turn-end status probe.
@@ -240,8 +240,8 @@ Worker lifecycle details.
 When all plan tasks are complete:
 
 1. Complete the canonical plan transition through `call_tool`.
-2. If the result contains a `knowledgeDispatch`, dispatch it through the Orca
-   flow above before returning the normal final response.
+2. If the terminal result contains a `knowledgeDispatch`, dispatch it through
+   the Orca flow above before returning the normal final response.
 3. Do not wait for a Stop hook or for the Writer to finish. Once dispatch is
    accepted, return the main reply immediately without polling or reading the
    Worker; do not manually trigger sync or Goal handling.
