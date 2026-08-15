@@ -808,8 +808,8 @@ function cindyAgentResult(output, operation) {
     ...(output.achievement && typeof output.achievement === 'object' ? { achievement: output.achievement } : {}),
     ...(transition ? { transition } : {}),
     ...(nextsteps.length ? { nextsteps } : {}),
-    ...(nextTask ? { nextTask } : {}),
-    ...(askUser ? { askUser } : {}),
+    ...(transition === 'subplan_returned' && nextTask ? { nextTask } : {}),
+    ...(transition === 'subplan_returned' && askUser ? { askUser } : {}),
     ...(guidance ? { guidance } : {}),
   };
 }
@@ -833,6 +833,8 @@ function cindyGuidance(planStatus, nextTask, askUser, rawCommandHints, transitio
     ...(transition === 'subplan_returned'
       ? { nextStep: 'The subplan is complete. Continue the active parent plan task; do not finish the workflow.' }
       : nextStep ? { nextStep } : {}),
+    ...(transition === 'subplan_returned' && nextTask ? { nextTask } : {}),
+    ...(transition === 'subplan_returned' && askUser ? { askUser } : {}),
     ...(commandHints.length ? { commandHints } : {}),
   };
 }
