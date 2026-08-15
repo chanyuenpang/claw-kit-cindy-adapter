@@ -668,6 +668,7 @@ function projectionFor(output) {
   if (!planStatus) return null;
   const plan = output.plan && typeof output.plan === 'object' ? output.plan : null;
   const planView = output.planView && typeof output.planView === 'object' ? output.planView : null;
+  const focusedSubplan = typeof output.subplanParentPlan === 'string' || typeof plan?.parentPlan === 'string';
   // The Cindy card follows the CLI's presentation order.  In particular this
   // keeps unfinished tasks ahead of completed planning work.
   const tasks = Array.isArray(planView?.tasks?.items) ? planView.tasks.items : Array.isArray(plan?.tasks) ? plan.tasks : [];
@@ -717,6 +718,11 @@ function projectionFor(output) {
     } : {}),
     ...(output.nextTask && typeof output.nextTask === 'object' ? { nextTask: output.nextTask } : {}),
   };
+  // A subplan is only a temporary focus. Its root parent Goal remains the
+  // session continuation while the child is active, waiting, or discussing.
+  // Do not emit a pause/complete action here: this host operation must never
+  // replace or close the parent Goal.
+  if (focusedSubplan) return { goal: 'preserve', planStatus, ...(typeof output.planPath === 'string' ? { planPath: output.planPath } : {}), card };
   if (planStatus === 'process.active') return { goal: 'resume', planStatus, ...(typeof output.planPath === 'string' ? { planPath: output.planPath } : {}), card };
   if (planStatus === 'process.wait' || planStatus === 'process.discussing') return { goal: 'pause', planStatus, ...(typeof output.planPath === 'string' ? { planPath: output.planPath } : {}), card };
   if (planStatus === 'end.completed') return {
@@ -793,12 +799,14 @@ function cindyAgentResult(output, operation) {
   const nextsteps = Array.isArray(rawNextsteps)
     ? rawNextsteps.filter((step) => typeof step === 'string')
     : [];
-  const guidance = cindyGuidance(planStatus, nextTask, askUser, workflowGuidance.commandHints ?? output.commandHints);
+  const transition = output.transition === 'subplan_returned' ? output.transition : undefined;
+  const guidance = cindyGuidance(planStatus, nextTask, askUser, workflowGuidance.commandHints ?? output.commandHints, transition);
   return {
     ...(stage ? { stage } : {}),
     ...(operation === 'task.done' ? { ok: true, command: operation } : {}),
     ...(operation === 'plan.done' && typeof output.planPath === 'string' ? { planPath: output.planPath } : {}),
     ...(output.achievement && typeof output.achievement === 'object' ? { achievement: output.achievement } : {}),
+    ...(transition ? { transition } : {}),
     ...(nextsteps.length ? { nextsteps } : {}),
     ...(nextTask ? { nextTask } : {}),
     ...(askUser ? { askUser } : {}),
@@ -806,7 +814,7 @@ function cindyAgentResult(output, operation) {
   };
 }
 
-function cindyGuidance(planStatus, nextTask, askUser, rawCommandHints) {
+function cindyGuidance(planStatus, nextTask, askUser, rawCommandHints, transition) {
   const nextStep = {
     'prepare.requirements': 'Clarify the requirements, then update the plan through claw-kit tools.',
     'prepare.review': 'Review the plan with the user; start it through claw-kit tools only after approval.',
@@ -822,7 +830,9 @@ function cindyGuidance(planStatus, nextTask, askUser, rawCommandHints) {
     : [];
   if (!nextStep && !nextTask && !askUser && commandHints.length === 0) return null;
   return {
-    ...(nextStep ? { nextStep } : {}),
+    ...(transition === 'subplan_returned'
+      ? { nextStep: 'The subplan is complete. Continue the active parent plan task; do not finish the workflow.' }
+      : nextStep ? { nextStep } : {}),
     ...(commandHints.length ? { commandHints } : {}),
   };
 }

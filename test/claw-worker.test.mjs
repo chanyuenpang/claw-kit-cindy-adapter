@@ -766,6 +766,67 @@ test("worker wraps the user-installed claw launcher with Cindy host and session 
   }
 });
 
+test("worker keeps the root Goal during a subplan and guides the resumed parent plan", { skip: process.platform !== "win32" }, async () => {
+  const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "claw-cindy-subplan-worker-"));
+  writePersistentClawFixture(fixtureDir, `(request) => process.stdout.write(JSON.stringify({
+    ok: true,
+    command: request.operation,
+    schemaVersion: 1,
+    output: request.operation === 'subplan.create'
+      ? {
+          planStatus: 'process.discussing',
+          planPath: 'plans/child.json',
+          subplanParentPlan: 'plans/root.json',
+          planSummary: '0/1 Child Plan',
+          planView: { title: 'Child Plan', counts: { completed: 0, total: 1 }, tasks: { items: [
+            { id: 1, title: 'Complete child work', status: 'pending' },
+          ] } },
+        }
+      : {
+          planStatus: 'process.active',
+          planPath: 'plans/root.json',
+          transition: 'subplan_returned',
+          planSummary: '1/3 Root Plan',
+          nextTask: { id: 2, title: 'Resume root work', status: 'pending' },
+          planView: { title: 'Root Plan', counts: { completed: 1, total: 3 }, tasks: { items: [
+            { id: 1, title: 'Create child plan', status: 'done' },
+            { id: 2, title: 'Resume root work', status: 'pending' },
+            { id: 3, title: 'Finish root work', status: 'pending' },
+          ] } },
+        },
+  }) + '\\n')`);
+
+  const child = spawn(process.execPath, [workerPath], {
+    cwd: fixtureDir,
+    env: { ...process.env, PATH: `${fixtureDir}${path.delimiter}${process.env.PATH || ""}` },
+    stdio: ["pipe", "pipe", "pipe"],
+    windowsHide: true,
+  });
+
+  try {
+    const childFocus = await requestWorker(child, {
+      jsonrpc: "2.0", id: 1, method: "claw/execute",
+      params: { operation: "subplan.create", args: { parent: "root-plan", taskId: 1 }, sessionId: "cindy-session", workdir: fixtureDir },
+    });
+    assert.equal(childFocus.result.projection.goal, "preserve");
+    assert.equal(childFocus.result.projection.planStatus, "process.discussing");
+
+    const parentReturn = await requestWorker(child, {
+      jsonrpc: "2.0", id: 2, method: "claw/execute",
+      params: { operation: "plan.done", args: { retrospective: "Child work completed." }, sessionId: "cindy-session", workdir: fixtureDir },
+    });
+    assert.equal(parentReturn.result.projection.goal, "resume");
+    assert.equal(parentReturn.result.result.transition, "subplan_returned");
+    assert.deepEqual(parentReturn.result.result.guidance, {
+      nextStep: "The subplan is complete. Continue the active parent plan task; do not finish the workflow.",
+      nextTask: { id: 2, title: "Resume root work", status: "pending" },
+    });
+  } finally {
+    await stopWorker(child);
+    fs.rmSync(fixtureDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  }
+});
+
 test("worker preserves a structured CLI failure code and reason", { skip: process.platform !== "win32" }, async () => {
   const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "claw-cindy-worker-error-"));
   writePersistentClawFixture(fixtureDir, `() => process.stdout.write(JSON.stringify({ ok: false, error: {

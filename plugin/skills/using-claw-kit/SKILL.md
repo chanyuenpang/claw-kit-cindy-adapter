@@ -76,8 +76,10 @@ unavailable; never substitute shell, background work, or an unsupported claim.
    `knowledge-finalizer`, agent `codex`, and the complete
    `knowledgeDispatch.prompt` as `initial_task`.
 3. If the workflow exists but that Worker does not, create it the same way.
-4. If the Worker already exists, call `cindy_orca.send_to_worker` with its
-   session id and the complete `knowledgeDispatch.prompt`.
+4. If the Worker already exists, call
+   `cindy_orca.send_to_worker({ target_session_id: worker.session_id, message: knowledgeDispatch.prompt })`.
+   Use the `session_id` returned by `get_workspace_info`; `worker_id` is not
+   the `send_to_worker` parameter.
 5. Map supplied `model` and `reasoningEffort` to Worker creation only when the
    Host advertises them as valid for the Codex Worker. Do not replace an
    unsupported configured model silently.
