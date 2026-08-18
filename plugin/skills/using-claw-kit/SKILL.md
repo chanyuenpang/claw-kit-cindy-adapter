@@ -57,7 +57,7 @@ This section applies to both execution routes. Cindy has one knowledge-closeout
 execution model: a persistent, UI-visible Orca Worker. When a terminal plan
 mutation returns a valid `knowledgeDispatch`, dispatch that Worker directly.
 That `knowledgeDispatch` is the claw-kit Orca authorization for the exact
-`knowledge-finalizer` lifecycle below; no separate user confirmation is
+`knowledge_finalizer` lifecycle below; no separate user confirmation is
 required. It does not authorize any other Worker. The dispatch is always
 executed by the Orca Agent in Cindy. The job already exists durably when the
 terminal mutation returns; neither dispatch nor report capture waits for a Stop
@@ -69,11 +69,11 @@ discover `mcp__cindy_orca__*` from `ALL_TOOLS`, then call
 `get_workspace_info`. Only an actual Orca call failure makes dispatch
 unavailable; never substitute shell, background work, or an unsupported claim.
 
-1. Call `cindy_orca.get_workspace_info` and look for a Worker with the stable
-   label `knowledge-finalizer`.
+1. Honor `knowledgeDispatch.preferReuse: true`: call `cindy_orca.get_workspace_info` and look for a Worker with the stable
+   label `knowledge_finalizer`.
 2. If no active workflow exists, call `cindy_orca.start_team`, then create the
-   Worker with `cindy_orca.create_worker`, role `knowledge-finalizer`, label
-   `knowledge-finalizer`, agent `codex`, and the complete
+   Worker with `cindy_orca.create_worker`, role `knowledge_finalizer`, label
+   `knowledge_finalizer`, agent `codex`, and the complete
    `knowledgeDispatch.prompt` as `initial_task`.
 3. If the workflow exists but that Worker does not, create it the same way.
 4. If the Worker already exists, call

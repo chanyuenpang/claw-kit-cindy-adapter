@@ -43,7 +43,7 @@ workflow, failure policy, permission boundary, and acceptance scenarios.
 The installable Ghost source is under [plugin](plugin). It bundles the
 declared workflow Skills plus the runtime hook entry. Cindy normalizes either
 configured knowledge execution policy to the compatibility value `subagent`; the active
-Lead pre-dispatches one persistent, sidebar-visible Orca `knowledge-finalizer` Worker after the terminal
+Lead pre-dispatches one persistent, sidebar-visible Orca `knowledge_finalizer` Worker after the terminal
 mutation has created the durable job. The Worker creates the packaged session
 delegate plan and calls the plugin's atomic `knowledge.claim`, which captures
 the originating Cindy task conclusions into the adjacent report before issuing

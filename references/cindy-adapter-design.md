@@ -74,7 +74,7 @@ The Cindy mapping follows the existing OpenCode adapter's event responsibilities
 | OpenCode first-message synthetic context | unsupported in Cindy until the Host provides trusted message context |
 | turn-end plan inspection | no CLI polling; the latest typed command result is the state source |
 | `process.active` continuation | Ghost Hook queues one background `agent.run` continuation after the assistant turn; the `.claw` plan status remains the gate |
-| completion knowledge closeout | Cindy normalizes every configured policy to the compatibility value `subagent`; it always means an Orca `knowledge-finalizer` Worker, never a native subagent. The terminal mutation creates the durable job and returns that Worker dispatch. The Worker atomically captures Cindy SQLite task conclusions during `knowledge.claim`, then owns claim/assignments/done without a Stop hook or errand. |
+| completion knowledge closeout | Cindy normalizes every configured policy to the compatibility value `subagent`; it always means the Orca `knowledge_finalizer` Worker, never a native subagent. The terminal mutation creates the durable job and returns that Worker dispatch. The Worker atomically captures Cindy SQLite task conclusions during `knowledge.claim`, then owns claim/assignments/done without a Stop hook or errand. |
 
 The plugin subscribes to the `session` topic, but its `did-session-created`
 handler performs no awaited work: it records the event and defers preparation
@@ -175,7 +175,7 @@ the `.claw` plan remains the continuation gate and source of truth.
 After all plan tasks are complete, the terminal mutation creates one durable
 Orca Worker job and returns its immutable `knowledgeDispatch` to the active Lead.
 The Lead sends that prompt unchanged to the persistent Orca
-`knowledge-finalizer` and returns without waiting.
+`knowledge_finalizer` and returns without waiting.
 
 The Worker calls `knowledge.claim`. Before issuing the claim token, the Cindy
 adapter opens Cindy's local SQLite database read-only, locates the originating
@@ -228,7 +228,7 @@ Implemented in the Cindy Ghost plugin package:
 The Host currently keeps the native Cindy Goal controller and progress surface
 optional because no stable third-party Goal API is available. The claw plan
 remains canonical; knowledge closeout is dispatched by the active Lead to its
-Orca `knowledge-finalizer`. The CLI remains a separate user-installed dependency and is
+Orca `knowledge_finalizer`. The CLI remains a separate user-installed dependency and is
 invoked by the declared Node worker.
 
 ## 11. Remaining runtime verification

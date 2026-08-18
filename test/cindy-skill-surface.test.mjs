@@ -108,7 +108,7 @@ test('Cindy omits WUM prompt injection and keeps session-start work asynchronous
   assert.match(skill, /cindy_orca\.start_team/);
   assert.match(skill, /cindy_orca\.create_worker/);
   assert.match(skill, /cindy_orca\.send_to_worker/);
-  assert.match(skill, /knowledge-finalizer/);
+  assert.match(skill, /knowledge_finalizer/);
   assert.match(skill, /Do not wait for the Worker/i);
   assert.match(skill, /Immediately finish the main response after that acknowledgement/i);
   assert.match(skill, /without polling or reading the\s+Worker/i);
