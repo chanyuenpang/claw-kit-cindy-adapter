@@ -31,7 +31,7 @@ const OPERATION_CATALOG = {
   plan: [
     {
       name: 'plan.create',
-      description: 'Create a claw plan for the current Cindy session.',
+      description: 'Create a claw plan for the current Cindy session. This is unavailable while the current plan is in process; use plan.leave first, or subplan.create for work within the current plan.',
       mutates: true,
       parameters: {
         type: 'object',
@@ -43,6 +43,12 @@ const OPERATION_CATALOG = {
         },
         required: ['title'],
       },
+    },
+    {
+      name: 'plan.leave',
+      description: 'Explicitly leave the current plan so a new root plan can be created.',
+      mutates: true,
+      parameters: objectParameters({}),
     },
     { name: 'plan.show', description: 'Show the session-bound plan.', mutates: false, parameters: objectParameters({ taskName: stringParameter('Optional task name.'), planFile: stringParameter('Optional plan file.') }) },
     {
@@ -398,6 +404,7 @@ function sessionRequest(name, args, workdir) {
       ...(typeof args.template === 'string' ? { templateName: args.template } : {}),
       ...(typeof args.templateFile === 'string' ? { templateFile: path.resolve(args.templateFile) } : {}),
     } };
+    case 'plan.leave': return { operation: name, input: {} };
     case 'plan.show': return { operation: name, input: { simple: false } };
     case 'plan.start': {
       const updates = {

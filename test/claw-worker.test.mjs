@@ -73,6 +73,9 @@ test("Cindy catalog reveals explicit session scope only for a known workspace wi
   const scopeParameter = (response) => response.result.categories
     .find((category) => category.name === "plan").operations
     .find((operation) => operation.name === "plan.create").parameters.properties.scope;
+  const planOperation = (response, name) => response.result.categories
+    .find((category) => category.name === "plan").operations
+    .find((operation) => operation.name === name);
   try {
     const unknown = await requestWorker(child, { jsonrpc: "2.0", id: 31, method: "claw/catalog", params: {} });
     const project = await requestWorker(child, { jsonrpc: "2.0", id: 32, method: "claw/catalog", params: { workdir: projectDir } });
@@ -83,6 +86,12 @@ test("Cindy catalog reveals explicit session scope only for a known workspace wi
       type: "string",
       enum: ["session"],
       description: "Only for isolated work outside a .claw project after choosing the session route.",
+    });
+    assert.deepEqual(planOperation(project, "plan.leave"), {
+      name: "plan.leave",
+      description: "Explicitly leave the current plan so a new root plan can be created.",
+      mutates: true,
+      parameters: { type: "object", properties: {} },
     });
   } finally {
     await stopWorker(child);
