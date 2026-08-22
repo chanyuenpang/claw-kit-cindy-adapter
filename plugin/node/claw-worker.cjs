@@ -4,7 +4,6 @@ const fs = require('node:fs');
 const path = require('node:path');
 const {
   candidateUserDataDirs,
-  readKnowledgeClaimCaptureAfterDelay,
   readTurnCaptureWithRetry,
   resolveCindySessionContext,
 } = require('./cindy-sqlite-reader.cjs');
@@ -928,6 +927,17 @@ rpcInput.on('line', async (line) => {
       });
       return;
     }
+    const collectorRegistration = await runClaw(
+      ['internal-report-collector-register', '--project-root', params.workdir, '--collector-host', 'cindy', '--executable', process.execPath, '--arg', path.join(__dirname, 'report-collector.cjs')],
+      params.workdir,
+      undefined,
+      10000,
+      params.sessionId,
+    );
+    if (!collectorRegistration.ok) {
+      reply(request.id, { ok: false, errorCode: collectorRegistration.errorCode, reason: collectorRegistration.reason });
+      return;
+    }
     const result = await runClaw(
       ['context', '--host', 'cindy'],
       params.workdir,
@@ -1178,32 +1188,11 @@ rpcInput.on('line', async (line) => {
           });
           return;
         }
-        const capture = await readKnowledgeClaimCaptureAfterDelay(
-          job.sessionId,
-          finalizeId,
-          job.reportCapture?.startedAt,
-          job.planPath,
-          job.projectRoot,
-        );
-        if (!capture) {
-          reply(request.id, {
-            ok: false,
-            operation,
-            errorCode: 'CINDY_REPORT_NOT_PERSISTED',
-            reason: 'The originating Cindy session records were unavailable after the required capture delay; retry knowledge.claim.',
-          });
-          return;
-        }
         const claimed = await runClaw([
           'knowledge', 'claim',
           '--job', jobPath,
-          '--cindy-report-stdin',
           '--host', 'cindy',
-        ], params.workdir, JSON.stringify({
-          session_id: capture.sessionId,
-          turn_id: capture.turnId,
-          task_conclusions: capture.taskConclusions,
-        }), 30000, params.sessionId);
+        ], params.workdir, undefined, 30000, params.sessionId);
         if (!claimed.ok) {
           reply(request.id, {
             ok: false,

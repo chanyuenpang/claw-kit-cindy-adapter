@@ -212,11 +212,9 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
   );
 }
 
-test("Cindy SQLite reader captures task conclusions without waiting for knowledgeDispatch persistence", () => {
+test("Cindy SQLite reader collects every plan final in chronology and closes at the next plan", () => {
   const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "claw-cindy-claim-capture-"));
   const dbPath = path.join(fixtureDir, "cindy-reader.db");
-  const finalizeId = "b".repeat(64);
-  const emptyFinalizeId = "c".repeat(64);
   const db = new DatabaseSync(dbPath);
   db.exec(`
     CREATE TABLE sessions (id TEXT PRIMARY KEY, sdk_session_id TEXT);
@@ -254,17 +252,13 @@ test("Cindy SQLite reader captures task conclusions without waiting for knowledg
   const previous = process.env.CINDY_USER_DATA;
   process.env.CINDY_USER_DATA = fixtureDir;
   try {
-    const { readKnowledgeClaimCapture } = require(sqliteReaderPath);
-    assert.deepEqual(readKnowledgeClaimCapture("originating-sdk-session", finalizeId), {
-      sessionId: "originating-sdk-session",
-      turnId: "turn-1",
-      taskConclusions: [{ turnId: "turn-1", message: "Implemented the report fix." }],
-    });
-    assert.deepEqual(readKnowledgeClaimCapture("empty-sdk-session", emptyFinalizeId), {
-      sessionId: "empty-sdk-session",
-      turnId: "empty-turn",
-      taskConclusions: [],
-    });
+    const { readPlanFinalAnswers } = require(sqliteReaderPath);
+    assert.deepEqual(readPlanFinalAnswers("originating-sdk-session", undefined, path.join(fixtureDir, "current-plan.json"), fixtureDir), [{
+      turnId: "turn-1", occurredAt: "1970-01-01T00:00:01.000Z", message: "Implemented the report fix.",
+    }]);
+    assert.deepEqual(readPlanFinalAnswers("empty-sdk-session", undefined, path.join(fixtureDir, "current-plan.json"), fixtureDir), [{
+      turnId: "empty-turn", occurredAt: "1970-01-01T00:00:01.000Z", message: "Closed a plan without a task conclusion.",
+    }]);
   } finally {
     if (previous === undefined) delete process.env.CINDY_USER_DATA;
     else process.env.CINDY_USER_DATA = previous;
@@ -1134,12 +1128,8 @@ process.exit(2);
     const commandsAfterClaim = fs.readFileSync(commandLogPath, "utf8").trim().split(/\r?\n/).map((line) => JSON.parse(line));
     const claimCommand = commandsAfterClaim.find(({ args }) => args[0] === "knowledge" && args[1] === "claim");
     assert.ok(claimCommand);
-    assert.match(claimCommand.args.join(" "), /--cindy-report-stdin/);
-    assert.deepEqual(JSON.parse(claimCommand.input), {
-      session_id: originatingSessionId,
-      turn_id: "turn-atomic",
-      task_conclusions: [{ turnId: "turn-atomic", message: "Implemented the atomic Cindy finalizer." }],
-    });
+    assert.doesNotMatch(claimCommand.args.join(" "), /report-stdin|cindy-report/i);
+    assert.equal(claimCommand.input, "");
 
     const done = await requestWorker(child, {
       jsonrpc: "2.0",

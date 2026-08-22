@@ -448,60 +448,36 @@ async function readTurnCaptureWithRetry(sessionId) {
   return null;
 }
 
-function readKnowledgeClaimCapture(sessionId, finalizeId, startedAt, planPath, projectRoot) {
-  if (!sessionId || !/^[a-f0-9]{64}$/i.test(finalizeId || '')) return null;
+// Adapter-owned all-final extraction for the shared report collector contract.
+function readPlanFinalAnswers(sessionId, startedAt, planPath, projectRoot) {
   const match = findDatabaseForSession(sessionId);
   if (!match) return null;
   try {
     const startedAtMs = typeof startedAt === 'string' ? Date.parse(startedAt) : Number.NaN;
-    const rows = readSessionMessages(match.db, match.cindySessionId).filter((row) => {
-      if (!Number.isFinite(startedAtMs)) return true;
-      const raw = Number(row.created_at);
-      if (!Number.isFinite(raw)) return true;
-      const createdAtMs = raw < 100_000_000_000 ? raw * 1000 : raw;
-      return createdAtMs >= startedAtMs;
-    });
-    let latestAssistant = '';
-    let latestTurnId = '';
-    const conclusions = [];
-    const seen = new Set();
-    const taskCompletionToolUseIds = new Set();
-    const taskCompletionToolMessages = new Map();
+    const rows = readSessionMessages(match.db, match.cindySessionId);
+    const answers = [];
+    let current = null;
     const planCreateToolUseIds = new Set();
-    for (const row of rows) {
-      if (row.role === 'assistant') {
-        const text = messageText(row.content);
-        if (text) {
-          latestAssistant = text;
-          latestTurnId = String(row.client_id || row.id || `row-${row.rowid}`);
-        }
-        continue;
-      }
-      if (row.role === 'tool_use') {
-        const toolUse = readJsonContent(row.content);
-        if (row.tool_use_id && isTaskCompletionToolUse(toolUse)) {
-          taskCompletionToolUseIds.add(row.tool_use_id);
-          taskCompletionToolMessages.set(row.tool_use_id, taskCompletionToolMessage(toolUse));
-        }
-        if (row.tool_use_id && isPlanCreateToolUse(toolUse)) planCreateToolUseIds.add(row.tool_use_id);
-        continue;
-      }
-      if (row.role !== 'tool_result') continue;
-      if (isNewPlanCreateResult(row, planCreateToolUseIds, planPath, projectRoot)) break;
-      if (isSuccessfulTaskCompletionResult(row, taskCompletionToolUseIds)) {
-        const message = taskCompletionToolMessages.get(row.tool_use_id) || latestAssistant;
-        const key = `${latestTurnId}\n${message}`;
-        if (message && !seen.has(key)) {
-          seen.add(key);
-          conclusions.push({ turnId: latestTurnId, message });
-        }
-      }
-    }
-    return {
-      sessionId,
-      turnId: latestTurnId || String(rows.at(-1)?.client_id || rows.at(-1)?.id || 'claim'),
-      taskConclusions: conclusions,
+    const flush = () => {
+      if (!current) return;
+      const row = current.row;
+      const raw = Number(row.created_at);
+      const occurredAt = Number.isFinite(raw) ? new Date(raw < 100_000_000_000 ? raw * 1000 : raw).toISOString() : undefined;
+      answers.push({ turnId: String(row.client_id || row.id || `row-${row.rowid}`), ...(occurredAt ? { occurredAt } : {}), message: current.message });
+      current = null;
     };
+    for (let sequence = 0; sequence < rows.length; sequence += 1) {
+      const row = rows[sequence];
+      const raw = Number(row.created_at);
+      const time = Number.isFinite(raw) ? (raw < 100_000_000_000 ? raw * 1000 : raw) : Number.NaN;
+      if (Number.isFinite(startedAtMs) && Number.isFinite(time) && time < startedAtMs) continue;
+      if (row.role === 'user') { flush(); continue; }
+      if (row.role === 'tool_use' && row.tool_use_id && isPlanCreateToolUse(readJsonContent(row.content))) { planCreateToolUseIds.add(row.tool_use_id); continue; }
+      if (row.role === 'tool_result' && isNewPlanCreateResult(row, planCreateToolUseIds, planPath, projectRoot)) { flush(); break; }
+      if (row.role === 'assistant') { const message = messageText(row.content); if (message) current = { row, sequence, message }; }
+    }
+    flush();
+    return answers;
   } catch {
     return null;
   } finally {
@@ -509,15 +485,9 @@ function readKnowledgeClaimCapture(sessionId, finalizeId, startedAt, planPath, p
   }
 }
 
-async function readKnowledgeClaimCaptureAfterDelay(sessionId, finalizeId, startedAt, planPath, projectRoot) {
-  await new Promise((resolve) => setTimeout(resolve, 10_000));
-  return readKnowledgeClaimCapture(sessionId, finalizeId, startedAt, planPath, projectRoot);
-}
-
 module.exports = {
   candidateUserDataDirs,
-  readKnowledgeClaimCapture,
-  readKnowledgeClaimCaptureAfterDelay,
+  readPlanFinalAnswers,
   readTurnCapture,
   readTurnCaptureWithRetry,
   resolveCindySessionContext,
