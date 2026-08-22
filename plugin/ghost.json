@@ -5,21 +5,34 @@
   "description": "Cindy workflow tools, lifecycle guidance, and Skills for claw-kit.",
   "whenToUse": "Use for Cindy sessions that need claw-kit plan, task, subplan, or workflow operations.",
   "command": "claw-kit",
-  "version": "0.2.24.0",
+  "version": "0.2.26.0",
   "kind": "chip",
   "entry": "main.js",
   "launch": "resident",
   "icon": "assets/icon.png",
   "settingsHtml": "panel.html",
-  "slots": ["agent", "node", "session-context", "skill", "subscribe", "tool", "card"],
-  "agent": { "background": true },
+  "slots": [
+    "agent",
+    "node",
+    "session-context",
+    "skill",
+    "subscribe",
+    "tool",
+    "card"
+  ],
+  "agent": {
+    "background": true
+  },
   "node": {
     "entry": "node/claw-worker.cjs",
     "protocol": "json-rpc-stdio",
     "lifecycle": "resident"
   },
   "subscribe": {
-    "topics": ["session", "turn"]
+    "topics": [
+      "session",
+      "turn"
+    ]
   },
   "tools": [
     {
@@ -50,7 +63,9 @@
             "description": "Arguments for the selected operation."
           }
         },
-        "required": ["name"]
+        "required": [
+          "name"
+        ]
       }
     }
   ],
