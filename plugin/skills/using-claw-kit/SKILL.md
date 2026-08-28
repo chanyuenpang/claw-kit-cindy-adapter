@@ -72,22 +72,20 @@ discover `mcp__cindy_orca__*` from `ALL_TOOLS`, then call
 `get_workspace_info`. Only an actual Orca call failure makes dispatch
 unavailable; never substitute shell, background work, or an unsupported claim.
 
-1. Honor `knowledgeDispatch.preferReuse: true`: call `cindy_orca.get_workspace_info` and look for a Worker with the stable
-   label `knowledge_finalizer`.
+1. Do not reuse a `knowledge_finalizer` Worker. Each `finalizeId` owns one
+   isolated Worker so a stale claim can never receive a later job.
 2. If no active workflow exists, call `cindy_orca.start_team`, then create the
    Worker with `cindy_orca.create_worker`, role `knowledge_finalizer`, label
-   `knowledge_finalizer`, agent `codex`, and the complete
-   `knowledgeDispatch.prompt` as `initial_task`.
-3. If the workflow exists but that Worker does not, create it the same way.
-4. If the Worker already exists, call
-   `cindy_orca.send_to_worker({ target_session_id: worker.session_id, message: knowledgeDispatch.prompt })`.
-   Use the `session_id` returned by `get_workspace_info`; `worker_id` is not
-   the `send_to_worker` parameter.
+   `knowledge_finalizer_<first 12 chars of finalizeId>`, agent `codex`, and
+   the complete `knowledgeDispatch.prompt` as `initial_task`.
+3. If the workflow exists, create that same uniquely labelled Worker. Do not
+   send a later dispatch to an existing Worker.
 5. Map supplied `model` and `reasoningEffort` to Worker creation only when the
    Host advertises them as valid for the Codex Worker. Do not replace an
    unsupported configured model silently.
-6. Treat `resumed`, `already-active`, and `queued` as accepted asynchronous
-   dispatch. Immediately finish the main response after that acknowledgement.
+6. Treat only a newly created or queued Worker as accepted asynchronous
+   dispatch. An unavailable, failed, or expired claim is terminal for that
+   Worker: end or archive it rather than retrying or reusing it. Immediately finish the main response after that acknowledgement.
    Do not wait for the Worker. Do not poll, read the Worker output, query its
    status, or describe the finalization as an unfinished foreground step. The Worker uses the
    `knowledge.claim` operation in the returned prompt to capture task

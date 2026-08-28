@@ -1043,26 +1043,6 @@ rpcInput.on('line', async (line) => {
       reply(request.id, { ok: true, alreadyCompleted: true, status: persisted.status, finalizeId });
       return;
     }
-    if (persisted.status === 'running' && typeof persisted.claimToken === 'string' && persisted.claimToken) {
-      const templatePath = path.join(path.dirname(jobPath), `${finalizeId}.assignments.json`);
-      if (!fs.existsSync(templatePath)) {
-        reply(request.id, { ok: false, error: 'Running knowledge finalization is missing its assignment template.' });
-        return;
-      }
-      reply(request.id, {
-        ok: true,
-        resumed: true,
-        status: persisted.status,
-        finalizeId,
-        claimToken: persisted.claimToken,
-        templatePath,
-        projectRoot: persisted.projectRoot,
-        planPath: persisted.planPath,
-        reportPath: persisted.reportPath,
-        writer: persisted.writer || null,
-      });
-      return;
-    }
     const claimed = await runClaw(['knowledge', 'claim', '--job', jobPath], params.workdir, undefined, 10000, executorSessionId);
     if (!claimed.ok || !claimed.output?.claimed || typeof claimed.output.claimToken !== 'string') {
       reply(request.id, { ok: false, error: claimed.error || 'Knowledge finalization job is not claimable.' });

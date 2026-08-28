@@ -104,10 +104,10 @@ test('Cindy omits WUM prompt injection and keeps session-start work asynchronous
   assert.match(skill, /If the terminal result contains a `knowledgeDispatch`/);
   assert.doesNotMatch(skill, /Session scope is temporary/);
   assert.doesNotMatch(skill, /Project-scoped plans/);
-  assert.match(skill, /cindy_orca\.get_workspace_info/);
+  assert.match(skill, /get_workspace_info/);
   assert.match(skill, /cindy_orca\.start_team/);
   assert.match(skill, /cindy_orca\.create_worker/);
-  assert.match(skill, /cindy_orca\.send_to_worker/);
+  assert.match(skill, /Do not\s+send a later dispatch to an existing Worker/i);
   assert.match(skill, /knowledge_finalizer/);
   assert.match(skill, /Do not wait for the Worker/i);
   assert.match(skill, /Immediately finish the main response after that acknowledgement/i);

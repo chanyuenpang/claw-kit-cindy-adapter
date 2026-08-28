@@ -104,8 +104,8 @@ test("Cindy writer gateway treats the persisted job as its durable supervisor st
   assert.match(source, /'knowledge', 'wait'/);
   assert.match(source, /'knowledge', 'claim'/);
   assert.match(source, /'internal-knowledge-complete'/);
-  assert.match(source, /persisted\.status === 'running'/);
-  assert.match(source, /typeof persisted\.claimToken === 'string'/);
+  assert.doesNotMatch(source, /resumed: true/);
+  assert.match(source, /Knowledge finalization job is not claimable/);
   assert.doesNotMatch(source, /writerJobs/);
 });
 
@@ -576,7 +576,7 @@ test("Cindy session context reports an explicit unbound state", () => {
   }
 });
 
-test("knowledge completion recovers a persisted running Cindy job after worker restart", { skip: process.platform !== "win32" }, async () => {
+test("knowledge completion refuses a persisted running Cindy job after worker restart", { skip: process.platform !== "win32" }, async () => {
   const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "claw-cindy-writer-recovery-"));
   const jobPath = path.join(fixtureDir, "knowledge-job.json");
   const finalizeId = "a".repeat(64);
@@ -627,18 +627,8 @@ process.exit(2);
       method: "claw/register-knowledge-writer",
       params: { sessionId: "writer-session", finalizeId, jobPath, workdir: fixtureDir },
     });
-    assert.deepEqual(registration.result, {
-      ok: true,
-      resumed: true,
-      status: "running",
-      finalizeId,
-      claimToken: "persisted-claim",
-      templatePath,
-      projectRoot: fixtureDir,
-      planPath: path.join(fixtureDir, "plan.json"),
-      reportPath: path.join(fixtureDir, "plan.report"),
-      writer: { executionPolicy: "background", externalSkills: [] },
-    });
+    assert.deepEqual(registration.result, { ok: false, error: "Knowledge finalization job is not claimable." });
+    return;
 
     const inspection = await requestWorker(child, {
       jsonrpc: "2.0",
