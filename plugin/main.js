@@ -372,6 +372,13 @@ async function captureTurnEndReport(msg) {
     traceHook('did-turn-end', { sessionId: cindySessionId, clawSessionId, phase: 'capture-failed', reason: capture?.error || capture?.reason || 'missing-database-turn-id' });
     return { status: 'capture-failed' };
   }
+  // The main-agent execution policy performs no transcript capture at all:
+  // the invoking agent deposits knowledge itself. This is a supported skip,
+  // not a capture failure.
+  if (capture?.ok && capture.captured === false && capture.reason === 'main-agent-policy') {
+    traceHook('did-turn-end', { sessionId: cindySessionId, clawSessionId, phase: 'capture-skipped', reason: 'main-agent-policy', turnId });
+    return { status: 'skipped', reason: 'main-agent-policy' };
+  }
   const captureKey = `${cindySessionId}:${turnId}`;
   if (capturedTurnKeys.has(captureKey)) return { status: 'duplicate' };
   if (capture?.ok && capture.captured) {
