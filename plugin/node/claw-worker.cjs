@@ -8,6 +8,10 @@ const {
   resolveCindySessionContext,
 } = require('./cindy-sqlite-reader.cjs');
 const sessions = new Map();
+const reclaiming = new Set();
+const configuredIdleMs = Number(process.env.CLAW_CINDY_SESSION_IDLE_MS);
+const SESSION_IDLE_MS = Number.isSafeInteger(configuredIdleMs) && configuredIdleMs >= 1000
+  ? configuredIdleMs : 10 * 60 * 1000;
 
 function traceWorker(event, fields = {}) {
   const record = { source: 'claw-kit-cindy', event, ts: new Date().toISOString(), ...fields };
@@ -182,6 +186,13 @@ function objectParameters(properties, required = []) {
 
 function invocation(args) {
   if (process.platform === 'win32') {
+    // Kill the real CLI process on timeout, not only its .cmd wrapper.
+    for (const dir of (process.env.PATH || '').split(';')) {
+      if (!dir || !fs.existsSync(path.join(dir, 'claw.cmd'))) continue;
+      const script = path.join(dir, 'node_modules', '@veewo', 'claw', 'dist', 'bin.js');
+      if (fs.existsSync(script)) return { executable: process.execPath, args: [script, ...args] };
+      break; // preserve PATH precedence for a non-npm shim
+    }
     return {
       executable: process.env.ComSpec || 'cmd.exe',
       args: ['/d', '/s', '/c', 'claw.cmd', ...args],
@@ -191,7 +202,7 @@ function invocation(args) {
 }
 
 class NativeClawSession {
-  constructor(sessionId, workdir) {
+  constructor(sessionId, workdir, onIdle, onExit, idleMs = SESSION_IDLE_MS) {
     this.sessionId = sessionId;
     this.workdir = path.resolve(workdir);
     this.child = null;
@@ -201,6 +212,37 @@ class NativeClawSession {
     this.openPromise = null;
     this.closed = false;
     this.chain = Promise.resolve();
+    this.queued = 0;
+    this.requestsStarted = 0;
+    this.idleTimer = null;
+    this.closePromise = null;
+    this.retiring = false;
+    this.onIdle = onIdle;
+    this.onExit = onExit;
+    this.idleMs = idleMs;
+    this.lastActivityAt = Date.now();
+    this.closeReason = null;
+  }
+
+  status() {
+    return { sessionId: this.sessionId, workdir: this.workdir, pid: this.child?.pid ?? null,
+      state: this.retiring ? 'reclaiming' : this.queued ? 'active' : this.closed ? 'dead' : 'idle',
+      queued: this.queued, requestsStarted: this.requestsStarted, lastActivityAt: this.lastActivityAt, closeReason: this.closeReason };
+  }
+
+  clearIdle() {
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = null;
+  }
+
+  scheduleIdle() {
+    this.clearIdle();
+    if (this.queued || this.retiring || this.closed || !this.onIdle) return;
+    this.idleTimer = setTimeout(() => {
+      this.idleTimer = null;
+      if (!this.queued && !this.retiring && !this.closed) this.onIdle(this);
+    }, this.idleMs);
+    this.idleTimer.unref?.();
   }
 
   open() {
@@ -214,6 +256,7 @@ class NativeClawSession {
         stdio: ['pipe', 'pipe', 'pipe'],
       });
       this.child = child;
+      traceWorker('session-transport-open', { sessionId: this.sessionId, workdir: this.workdir, pid: child.pid });
       const timer = setTimeout(() => {
         this.failPending(sessionError('CLAW_SESSION_OPEN_TIMEOUT', 'claw session open timed out.', 'known'));
         child.kill();
@@ -225,6 +268,7 @@ class NativeClawSession {
             reject(sessionResponseError(value, 'CLAW_SESSION_OPEN_FAILED'));
             return;
           }
+          this.scheduleIdle();
           resolve(this);
         },
         reject: (error) => {
@@ -236,12 +280,20 @@ class NativeClawSession {
       child.stderr.on('data', (chunk) => {
         this.stderr = (this.stderr + String(chunk)).slice(-8192);
       });
+      child.stdin.on('error', (error) => {
+        this.failPending(sessionError('SESSION_CONNECTION_LOST', error.message, 'unknown'));
+      });
       child.on('error', (error) => {
         this.closed = true;
+        this.clearIdle();
+        this.onExit?.(this);
         this.failPending(sessionError('CLAW_CLI_UNAVAILABLE', `claw CLI is unavailable: ${error.message}`, 'known'));
       });
       child.on('close', (code) => {
         this.closed = true;
+        this.clearIdle();
+        this.onExit?.(this);
+        traceWorker('session-transport-exit', { sessionId: this.sessionId, workdir: this.workdir, pid: child.pid, code, reason: this.closeReason || 'unexpected' });
         const detail = this.stderr.trim();
         this.failPending(sessionError(
           'SESSION_CONNECTION_LOST',
@@ -273,6 +325,10 @@ class NativeClawSession {
   }
 
   request(request, timeoutMs = 30000) {
+    if (this.retiring || this.closed) return Promise.reject(sessionError('SESSION_CONNECTION_LOST', 'claw session is closing.', 'known'));
+    this.queued++;
+    this.requestsStarted++;
+    this.clearIdle();
     const execute = async () => {
       await this.open();
       if (this.closed || !this.child?.stdin?.writable) {
@@ -281,6 +337,7 @@ class NativeClawSession {
       return await new Promise((resolve, reject) => {
         const timer = setTimeout(() => {
           this.pending = null;
+          this.closed = true;
           this.child?.kill();
           reject(sessionError('CLAW_SESSION_TIMEOUT', `claw session command timed out after ${timeoutMs}ms.`, 'unknown'));
         }, timeoutMs);
@@ -305,24 +362,29 @@ class NativeClawSession {
     };
     const result = this.chain.then(execute, execute);
     this.chain = result.catch(() => undefined);
+    void result.finally(() => { this.queued--; this.lastActivityAt = Date.now(); this.scheduleIdle(); }).catch(() => undefined);
     return result;
   }
 
-  close() {
-    if (this.closed || !this.child) return Promise.resolve();
-    return new Promise((resolve) => {
-      const child = this.child;
-      const timer = setTimeout(() => {
-        if (!this.closed) child.kill();
-        resolve();
-      }, 1000);
-      child.once('close', () => {
-        clearTimeout(timer);
-        resolve();
+  close(reason = 'explicit') {
+    if (this.closePromise) return this.closePromise;
+    this.closeReason = reason;
+    this.retiring = true;
+    this.clearIdle();
+    this.closePromise = this.chain.then(() => {
+      if (this.closed || !this.child) return;
+      return new Promise((resolve) => {
+        const child = this.child;
+        const timer = setTimeout(() => {
+          if (!this.closed) child.kill();
+          resolve();
+        }, 1000);
+        child.once('close', () => { clearTimeout(timer); resolve(); });
+        if (child.stdin.writable) child.stdin.write('session close\n');
+        else child.kill();
       });
-      if (child.stdin.writable) child.stdin.write('session close\n');
-      else child.kill();
     });
+    return this.closePromise;
   }
 
   failPending(error) {
@@ -367,12 +429,26 @@ function validateSessionIdentity(sessionId, workdir) {
   return { sessionId: sessionId.trim(), workdir: resolved };
 }
 
+function releaseSession(key, session, reason) {
+  if (sessions.get(key) !== session) return;
+  sessions.delete(key);
+  reclaiming.add(session);
+  traceWorker('session-transport-reclaim', { sessionId: session.sessionId, workdir: session.workdir, pid: session.child?.pid, reason });
+  void session.close(reason).catch((error) => {
+    traceWorker('session-transport-close-failed', { sessionId: session.sessionId, workdir: session.workdir, reason, error: String(error) });
+  }).finally(() => reclaiming.delete(session));
+}
+
 async function ensureSession(sessionId, workdir) {
   const identity = validateSessionIdentity(sessionId, workdir);
   const key = `${identity.workdir}\0${identity.sessionId}`;
   let session = sessions.get(key);
   if (!session || session.closed) {
-    session = new NativeClawSession(identity.sessionId, identity.workdir);
+    session = new NativeClawSession(identity.sessionId, identity.workdir, (idle) => {
+      releaseSession(key, idle, 'idle-timeout');
+    }, (exited) => {
+      if (sessions.get(key) === exited) sessions.delete(key);
+    });
     sessions.set(key, session);
     try {
       await session.open();
@@ -388,7 +464,7 @@ let shuttingDown = false;
 async function shutdownWorker() {
   if (shuttingDown) return;
   shuttingDown = true;
-  await Promise.allSettled([...sessions.values()].map((session) => session.close()));
+  await Promise.allSettled([...new Set([...sessions.values(), ...reclaiming])].map((session) => session.close('worker-shutdown')));
   process.exit(0);
 }
 process.on('SIGINT', () => { void shutdownWorker(); });
@@ -400,6 +476,7 @@ function sessionRequest(name, args, workdir) {
       title: requiredString(args, 'title'),
       ...(typeof args.goal === 'string' ? { goalText: args.goal } : {}),
       ...(args.scope === 'session' ? { scope: 'session' } : {}),
+      ...(typeof args.knowledge_capture === 'boolean' ? { knowledgeCapture: args.knowledge_capture } : {}),
       ...(typeof args.template === 'string' ? { templateName: args.template } : {}),
       ...(typeof args.templateFile === 'string' ? { templateFile: path.resolve(args.templateFile) } : {}),
     } };
@@ -898,6 +975,10 @@ rpcInput.on('line', async (line) => {
   let request;
   try { request = JSON.parse(line); } catch { return; }
   const params = request.params || {};
+  if (request.method === 'claw/session-transports') {
+    reply(request.id, { idleTimeoutMs: SESSION_IDLE_MS, sessions: [...new Set([...sessions.values(), ...reclaiming])].map((session) => session.status()) });
+    return;
+  }
   if (request.method === 'claw/catalog') {
     const catalog = catalogForWorkdir(params.workdir);
     reply(request.id, { categories: Object.entries(catalog).map(([name, operations]) => ({ name, operations })) });
@@ -1139,6 +1220,8 @@ rpcInput.on('line', async (line) => {
       const operationArgs = params.args && typeof params.args === 'object' ? params.args : {};
       let output;
       let envelope = {};
+      let completedSession;
+      let completedOrdinal;
       if (operation === 'knowledge.claim') {
         const finalizeId = requiredString(operationArgs, 'finalizeId');
         const located = await runClaw([
@@ -1273,7 +1356,10 @@ rpcInput.on('line', async (line) => {
         output = result.output;
       } else {
         const session = await ensureSession(params.sessionId, params.workdir);
-        const response = await session.request(sessionRequest(operation, operationArgs, params.workdir));
+        const command = session.request(sessionRequest(operation, operationArgs, params.workdir));
+        const ordinal = session.requestsStarted;
+        const response = await command;
+        if (operation === 'plan.done') { completedSession = session; completedOrdinal = ordinal; }
         output = response.output;
         envelope = {
           ...(Array.isArray(response.hostActions) ? { hostActions: response.hostActions } : {}),
@@ -1288,6 +1374,14 @@ rpcInput.on('line', async (line) => {
         ...(projectionFor(output) ? { projection: projectionFor(output) } : {}),
         ...envelope,
       });
+      // Finalizer dispatch is an independent job: keep its envelope intact,
+      // then release only this completed plan's CLI transport. A later
+      // request for a new plan wins over the older completion.
+      if (completedSession && completedSession.queued === 0
+        && completedSession.requestsStarted === completedOrdinal) {
+        const key = `${completedSession.workdir}\0${completedSession.sessionId}`;
+        releaseSession(key, completedSession, 'plan.done');
+      }
     } catch (error) {
       const structured = typeof error?.code === 'string'
         ? { errorCode: error.code, reason: error.message }

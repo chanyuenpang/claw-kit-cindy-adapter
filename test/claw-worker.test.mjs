@@ -167,10 +167,14 @@ function requestWorker(child, request, timeoutMs = 2_000) {
 
     child.stdout.on("data", (chunk) => {
       stdout += String(chunk);
-      const newline = stdout.indexOf("\n");
-      if (newline < 0) return;
-      clearTimeout(timer);
-      resolve(JSON.parse(stdout.slice(0, newline)));
+      for (let newline = stdout.indexOf("\n"); newline >= 0; newline = stdout.indexOf("\n")) {
+        const response = JSON.parse(stdout.slice(0, newline));
+        stdout = stdout.slice(newline + 1);
+        if (response.id !== request.id) continue;
+        clearTimeout(timer);
+        resolve(response);
+        return;
+      }
     });
     child.stderr.on("data", (chunk) => {
       stderr += String(chunk);
@@ -197,6 +201,7 @@ function writePersistentClawFixture(fixtureDir, commandHandlerSource) {
   fs.writeFileSync(scriptPath, `
 const readline = require('node:readline');
 const args = process.argv.slice(2);
+if (process.env.CINDY_CLAW_OPEN_LOG) require('node:fs').appendFileSync(process.env.CINDY_CLAW_OPEN_LOG, 'open\\n');
 if (args[0] !== 'session' || args[1] !== 'open') process.exit(2);
 process.stdout.write(JSON.stringify({ ok: true, command: 'session.open', session: { state: 'live' } }) + '\\n');
 const handle = ${commandHandlerSource};
@@ -211,6 +216,131 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
     'utf8',
   );
 }
+
+test("Cindy plan.done releases its CLI transport and next plan restores same session", { skip: process.platform !== "win32" }, async () => {
+  const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "claw-cindy-transport-"));
+  const openLog = path.join(fixtureDir, "opens.log");
+  writePersistentClawFixture(fixtureDir, `(request) => process.stdout.write(JSON.stringify({
+    ok: true, command: request.operation, schemaVersion: 1,
+    output: { planStatus: request.operation === 'plan.done' ? 'end.completed' : 'process.active' },
+    ...(request.operation === 'plan.done' ? { knowledgeDispatch: { finalizeId: 'job-a', prompt: 'writer runs separately' } } : {}),
+  }) + '\\n')`);
+  const child = spawn(process.execPath, [workerPath], {
+    cwd: fixtureDir,
+    env: { ...process.env, PATH: `${fixtureDir}${path.delimiter}${process.env.PATH || ""}`, CINDY_CLAW_OPEN_LOG: openLog },
+    stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
+  });
+  const execute = (id, operation, args = {}) => requestWorker(child, {
+    jsonrpc: "2.0", id, method: "claw/execute",
+    params: { operation, args, sessionId: "cindy-transport", workdir: fixtureDir },
+  });
+  try {
+    const first = await execute(1, "plan.show");
+    assert.equal(first.result.ok, true, JSON.stringify(first));
+    assert.equal((await execute(2, "plan.show")).result.ok, true);
+    assert.equal(fs.readFileSync(openLog, "utf8").trim().split("\n").length, 1);
+    const census = await requestWorker(child, { jsonrpc: "2.0", id: 30, method: "claw/session-transports" });
+    assert.equal(census.result.sessions[0].sessionId, "cindy-transport");
+    assert.equal(census.result.sessions[0].state, "idle");
+    assert.equal(typeof census.result.sessions[0].pid, "number");
+    const completed = await execute(3, "plan.done", { retrospective: "done" });
+    assert.equal(completed.result.knowledgeDispatch.finalizeId, "job-a");
+    const afterDone = await requestWorker(child, { jsonrpc: "2.0", id: 31, method: "claw/session-transports" });
+    assert.ok(afterDone.result.sessions.every((entry) => entry.state === "reclaiming"));
+    assert.equal((await execute(4, "plan.create", { title: "Next plan" })).result.ok, true);
+    assert.equal(fs.readFileSync(openLog, "utf8").trim().split("\n").length, 2);
+  } finally {
+    await stopWorker(child);
+    fs.rmSync(fixtureDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  }
+});
+
+test("Cindy idle lease preserves active requests then reopens after expiry", { skip: process.platform !== "win32" }, async () => {
+  const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "claw-cindy-idle-"));
+  const openLog = path.join(fixtureDir, "opens.log");
+  writePersistentClawFixture(fixtureDir, `(request) => setTimeout(() => process.stdout.write(JSON.stringify({
+    ok: true, command: request.operation, output: { planStatus: 'process.active' },
+  }) + '\\n'), request.operation === 'plan.show' ? 1250 : 0)`);
+  const child = spawn(process.execPath, [workerPath], {
+    cwd: fixtureDir, env: { ...process.env, PATH: `${fixtureDir}${path.delimiter}${process.env.PATH || ""}`,
+      CINDY_CLAW_OPEN_LOG: openLog, CLAW_CINDY_SESSION_IDLE_MS: "1000" },
+    stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
+  });
+  try {
+    const pending = requestWorker(child, { jsonrpc: "2.0", id: 1, method: "claw/execute",
+      params: { operation: "plan.show", args: {}, sessionId: "idle-agent", workdir: fixtureDir } }, 4000);
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    const active = await requestWorker(child, { jsonrpc: "2.0", id: 2, method: "claw/session-transports" });
+    assert.equal(active.result.sessions[0].state, "active");
+    assert.equal((await pending).result.ok, true);
+    await new Promise((resolve) => setTimeout(resolve, 1250));
+    const expired = await requestWorker(child, { jsonrpc: "2.0", id: 3, method: "claw/session-transports" });
+    assert.equal(expired.result.sessions.length, 0);
+    assert.equal(fs.readFileSync(openLog, "utf8").trim().split("\n").length, 1);
+    const restored = await requestWorker(child, { jsonrpc: "2.0", id: 4, method: "claw/execute",
+      params: { operation: "plan.create", args: { title: "new" }, sessionId: "idle-agent", workdir: fixtureDir } });
+    assert.equal(restored.result.ok, true);
+    assert.equal(fs.readFileSync(openLog, "utf8").trim().split("\n").length, 2);
+  } finally {
+    await stopWorker(child);
+    fs.rmSync(fixtureDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  }
+});
+
+test("Cindy completed-plan reply cannot close a concurrently started next plan", { skip: process.platform !== "win32" }, async () => {
+  const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "claw-cindy-race-"));
+  const openLog = path.join(fixtureDir, "opens.log");
+  writePersistentClawFixture(fixtureDir, `(request) => setTimeout(() => process.stdout.write(JSON.stringify({
+    ok: true, command: request.operation, output: { planStatus: request.operation === 'plan.done' ? 'end.completed' : 'process.active' },
+  }) + '\\n'), request.operation === 'plan.done' ? 40 : 0)`);
+  const child = spawn(process.execPath, [workerPath], {
+    cwd: fixtureDir, env: { ...process.env, PATH: `${fixtureDir}${path.delimiter}${process.env.PATH || ""}`, CINDY_CLAW_OPEN_LOG: openLog },
+    stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
+  });
+  const execute = (id, operation, args = {}) => requestWorker(child, { jsonrpc: "2.0", id, method: "claw/execute",
+    params: { operation, args, sessionId: "race-agent", workdir: fixtureDir } });
+  try {
+    await execute(1, "plan.show");
+    const finishing = execute(2, "plan.done", { retrospective: "done" });
+    const newPlan = execute(3, "plan.create", { title: "Next" });
+    assert.equal((await finishing).result.ok, true);
+    assert.equal((await newPlan).result.ok, true);
+    const census = await requestWorker(child, { jsonrpc: "2.0", id: 4, method: "claw/session-transports" });
+    assert.equal(census.result.sessions.length, 1);
+    assert.equal(census.result.sessions[0].state, "idle");
+    assert.equal(fs.readFileSync(openLog, "utf8").trim().split("\n").length, 1);
+  } finally {
+    await stopWorker(child);
+    fs.rmSync(fixtureDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  }
+});
+
+test("Cindy unexpected CLI exit drops old transport before a new request", { skip: process.platform !== "win32" }, async () => {
+  const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "claw-cindy-crash-"));
+  const openLog = path.join(fixtureDir, "opens.log");
+  writePersistentClawFixture(fixtureDir, `(request) => {
+    if (request.operation === 'plan.show') process.exit(1);
+    process.stdout.write(JSON.stringify({ ok: true, command: request.operation, output: {} }) + '\\n');
+  }`);
+  const child = spawn(process.execPath, [workerPath], {
+    cwd: fixtureDir, env: { ...process.env, PATH: `${fixtureDir}${path.delimiter}${process.env.PATH || ""}`, CINDY_CLAW_OPEN_LOG: openLog },
+    stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
+  });
+  try {
+    const failed = await requestWorker(child, { jsonrpc: "2.0", id: 1, method: "claw/execute",
+      params: { operation: "plan.show", args: {}, sessionId: "crash-agent", workdir: fixtureDir } });
+    assert.equal(failed.result.ok, false);
+    const census = await requestWorker(child, { jsonrpc: "2.0", id: 2, method: "claw/session-transports" });
+    assert.equal(census.result.sessions.length, 0);
+    const restored = await requestWorker(child, { jsonrpc: "2.0", id: 3, method: "claw/execute",
+      params: { operation: "plan.create", args: { title: "after crash" }, sessionId: "crash-agent", workdir: fixtureDir } });
+    assert.equal(restored.result.ok, true);
+    assert.equal(fs.readFileSync(openLog, "utf8").trim().split("\n").length, 2);
+  } finally {
+    await stopWorker(child);
+    fs.rmSync(fixtureDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  }
+});
 
 test("Cindy SQLite reader collects every plan final in chronology and closes at the next plan", () => {
   const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "claw-cindy-claim-capture-"));
