@@ -3,64 +3,94 @@ name: researcher
 description: Use for complex research questions that require an independent, multi-step process of gathering and synthesizing evidence—not direct fact lookups or routine searches.
 ---
 
-# Researcher
+# researcher
 
-Run a concrete, bounded code investigation through Cindy's Orca workflow. The researcher is a persistent, UI-visible Worker session in the current workflow.
-This Orca Agent owns the claw-kit researcher delegation in Cindy.
+Investigate a concrete, bounded question about code, behavior, architecture, or
+project Truth/ADR. Return a compact evidence-backed answer, not implementation.
+Keep source files and repository state unchanged: do not write code, Truth, ADR,
+plan state, or research artifacts with this skill.
 
-## Orca authorization
+## Main agent and assigned researcher
 
-Selecting this skill for a concrete, bounded investigation within the user's
-request is the claw-kit Orca authorization to inspect the current workspace and
-dispatch one matching `researcher` Worker. Do not wait for a separate user
-confirmation. Use this Orca authorization whenever the task calls for focused
-research delegation.
-This authorization is limited to the investigation and Worker role described by
-this skill: never repurpose a non-researcher Worker, send research to a
-`knowledge-finalizer`, or change unrelated Worker or team lifecycle.
+- Main agent: choose the active host route below. Where delegation is required,
+  dispatch the narrow contract and obtain its result before dependent work.
+- Assigned researcher (including a reused child or Worker): investigate directly
+  as the sole researcher; do not delegate again or run the main-agent route.
+- Before every dispatch or reuse assignment, briefly tell the user the
+  researcher's role and task in one sentence. This is disclosure, not an
+  additional permission request. Actual session authorization and tool schemas
+  still take precedence over this skill.
+- Reuse a suitable same-role worker only when the current host supports it and
+  its identity is known. Do not infer a role from unrelated task text or reuse
+  a knowledge-finalizer. Lack of reuse does not prevent a fresh bounded child.
+  On DSH this lookup and fallback belong to the adapter, not the main agent.
 
-## When coordinating research
+## Host routing
 
-1. Call `cindy_orca.get_workspace_info` before dispatching. Match only a Worker
-   whose role is exactly `researcher`. Prefer the stable label `researcher`; if
-   there is no exact-label match, reuse a sole unambiguous researcher-role
-   Worker. Never infer a match from a non-researcher label or current task text.
-2. If no active workflow exists, call `cindy_orca.start_team`, then create the
-   Worker as described below.
-3. If a matching Worker exists, call `cindy_orca.send_to_worker` with its
-   session id as `target_session_id`. A busy Worker may accept queued work. If
-   multiple researcher-role Workers exist without the stable label, surface the
-   ambiguity instead of guessing or creating another Worker.
-4. If no matching Worker exists, call `cindy_orca.create_worker` with role
-   `researcher`, label `researcher`, an appropriate available agent, and the
-   assignment in `initial_task`. Leave model, effort, and fast mode unspecified
-   by default; apply values the user requests. Do not create a second matching
-   Worker merely because the existing one is busy.
-5. Make every assignment independently executable. Include these labeled sections:
-   - `Intent`: why the investigation matters
-   - `Decisions`: constraints and choices already settled
-   - `Boundaries`: read-only scope, exact targets, and repository state to preserve
-   - `Task`: the concrete question and required evidence
-6. Require the Worker to investigate directly as the sole researcher, preserve repository state, and return `status`, `findings`, `uncertainty`, and `nextStep` with exact paths, symbols, or line anchors.
-7. Accept a dispatch when the Orca response explicitly reports that the task was dispatched, queued, resumed, or already active. Surface every other dispatch outcome immediately.
-8. After a successful dispatch, immediately end the current Lead turn without a normal user-facing reply, further tool calls, polling, or independent work. Wait for Cindy's automatic delivery of the Worker's report; only resume the dependent work in the follow-up turn that receives that report.
-9. Keep a useful researcher Worker available for related investigations by default. Archive it or end the team when the user requests that lifecycle change.
+Select the active adapter from its current trusted `[claw host]` platform marker
+or native adapter identity and verify its tools, not the model or location of
+this file. Follow using-claw-kit's identity precedence; remote tool identity does
+not override the current session. A conflict or unknown host is an explicit gap,
+not a fallback to another platform. A native adapter takes precedence over a
+hostless copy.
+Read only the matching section of [Host execution](references/host-execution.md).
 
-## When running as the researcher Worker
+| Host | Main-agent route | Project recall |
+| --- | --- | --- |
+| DSH | `claw_run` `delegate.start` / `delegate.result`; adapter owns backend selection and reuse. | `claw_run` operation `search`, args `{query}` |
+| Codex | Native same-thread researcher reuse or fresh agent; wait for its result. | Read-only `claw search --query "<topic>"` through the permitted Codex shell tool; no forged host/session arguments |
+| Cindy | Exact-role Orca researcher Worker; after accepted dispatch end the Lead turn. | Cindy Ghost `list_tools` / `call_tool` search operation |
+| OpenCode | Direct investigation when invoked inline; use its task/explorer subagent when the owning workflow delegates. | Active OpenCode adapter injected command route |
+| Standard hostless | Direct investigation, or a native subagent when the owning workflow requires one and the host supports it. | `claw search --query "<topic>"` with stable `CLAW_SESSION_ID`; no host flag |
 
-Execute the assignment directly as the sole researcher within its read-only boundaries. Keep repository state unchanged.
+Do not replace a failed native adapter call with a hostless CLI call. If recall
+or an optional code index is unavailable, report that gap and continue with the
+remaining read-only evidence route; do not claim the missing evidence exists.
 
-Work within the supplied scope. Prefer configured code indexes or semantic search when available, with precise inspection of the smallest relevant set of files, symbols, tests, and dependency relationships as the fallback. Distinguish confirmed behavior from inference and cite exact paths, symbols, or line anchors.
+## Investigation order
 
-Send one completed or blocked report to the Lead with the `send_to_lead` tool supplied by the Worker instructions. Use this shape:
+1. Use project recall before broader source investigation. Recover the relevant
+   Truth, ADR and declared documentation, not an indiscriminate repository dump.
+2. Read project configuration when needed to discover enabled code indexes or
+   routing capabilities, including team configuration and personal overrides.
+3. Use GitNexus or another configured index for symbol relationships and
+   architecture tracing. Fall back to exact source inspection if unavailable
+   or too narrow; document consequential gaps.
+4. Inspect only the files, symbols, tests and relationships needed to answer the
+   question with host read/search tools. On DSH use `read`, `glob` and
+   `grep`, not shell equivalents.
+5. Separate confirmed behavior from inference. Stop when the question can be
+   answered or the smallest missing evidence can be identified.
 
-status: answered, unresolved, or blocked
+## Delegation contract
 
-findings:
-- concise evidence-backed findings with exact anchors
+This is a role contract, not literal tool arguments. Map it to the current
+host tool schema. Include the loaded skill path and host route in a fresh brief;
+never assume a same-named project copy represents that route.
 
-uncertainty:
-- remaining gaps, or none
+```yaml
+delegateSubagents:
+  - name: researcher
+    skill: researcher
+    worker: readonly
+    fork_context: false
+    waitForCompletion: true
+    preferReuse: true
+    inputContract:
+      question: concrete bounded investigation question
+      cwd: working directory
+      targets: known files, modules, or symbols
+      constraints: read-only boundaries and repository state to preserve
+      skillPath: absolute path of this loaded skill
+      hostRoute: active adapter and its recall/dispatch route
+    outputContract:
+      status: answered or unresolved
+      findings: concise evidence with exact paths, symbols, and line anchors
+      uncertainty: explicit gaps or none
+      nextStep: recommendation for the main agent
+    closePolicy: keep_open_for_reuse
+```
 
-nextStep:
-- the most useful action for the coordinating agent
+Cindy Workers may also report `blocked` through their supplied
+`send_to_lead` tool. Other hosts return the contract through their native
+result channel. Keep large narratives out unless the investigation needs them.

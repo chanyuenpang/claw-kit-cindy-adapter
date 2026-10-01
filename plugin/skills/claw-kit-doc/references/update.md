@@ -24,6 +24,16 @@ Verify all of these separately:
 
 Do not use Cindy's marketplace steps or unpublished workspace files.
 
+## DSH
+
+Use the DSH adapter-owned `update` skill for an authorized update. Update the published global `@veewo/claw` CLI and `@veewo/dsh-claw-kit` npm package as one unit, selecting the confirmed current profile rather than assuming `web`. Use `claw_run` for any plan/task/subplan operations; package-manager commands are installation work, not a substitute workflow transport.
+
+Verify the exact installed package and CLI versions, the profile's `claw-kit` config row, and all bundled skills declared by the installed package. An on-disk install is not activation. Restart only with explicit authorization; otherwise defer runtime checks until the owner restarts and a real session exposes `claw_run`. Do not use unpublished workspace files for a published-source update.
+
+## Standard hostless
+
+There is no host plugin to align. With user authorization, update the CLI through the native package manager (`npm install -g @veewo/claw@latest`) and verify the resulting `claw --version`. Do not infer permission to install a platform adapter.
+
 ## Cindy
 
 Cindy intentionally does not expose a claw-kit `update` skill. Guide the user

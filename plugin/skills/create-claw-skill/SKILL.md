@@ -2,35 +2,27 @@
 name: create-claw-skill
 description: Use when a user wants to convert a specified text skill or skill idea into a claw-template-backed skill in the same skill package, with template-owned workflow guidance and an adjacent fallback document.
 ---
-<!-- AUTO-GENERATED from shared/skills/create-claw-skill/SKILL.md. Edit the shared source instead. -->
 # create-claw-skill
-
-This skill uses Cindy Ghost `list_tools` and `call_tool` for every claw plan, subplan, validation, and task mutation. Never translate its operation into a shell command in the Agent prompt.
 
 Convert a specified text skill or user idea into a template-backed claw skill. Keep this entry thin; the template owns conversion and validation.
 
 ## Route By Task Ownership
 
-Resolve `<skill-dir>` as the directory containing this loaded `SKILL.md`.
+Resolve `<skill-dir>` as the directory containing this loaded `SKILL.md`. Read [host routing](references/host-routing.md) before invoking a workflow operation; command spellings below are semantic equivalents, not permission to bypass the current adapter.
 
 - If the user's requirements would require broad changes to this skill's template workflow, do not create its template plan or subplan. Read `FALLBACK.md` and apply the direct workflow instead.
-- If this skill fully owns the whole current task, call Ghost operation `plan.create` with the template file and title.
-- If this skill fully owns one stage of a broader plan, call Ghost operation `subplan.create` with the parent and task id and consume its returned guidance.
+- If this skill fully owns the whole current task, use `claw plan create --template-file "<skill-dir>/TEMPLATE.json" --title "<skill-name>"`.
+- If this skill fully owns one stage of a broader plan, use `claw subplan create --parent <parent-task-name> --task-id <id> --template-file "<skill-dir>/TEMPLATE.json"`. Follow the owning host's handoff; on DSH the adapter consumes Goal/progress effects automatically, so never call goal tools or overwrite the parent goal. A batch is a common example: the broader plan contains repeated conversion stages, and each stage invokes this skill once as a subplan.
 - If this skill only contributes instructions inside a stage that mixes multiple skills, do not create its template plan. Read `FALLBACK.md` and apply the relevant guidance inside the owning workflow.
-- If the Ghost tool or template is unavailable, read `FALLBACK.md` and run the direct workflow without pretending the plan mutation succeeded.
+- If the claw CLI or template is unavailable, read `FALLBACK.md` and run the direct workflow.
 
 After plan or subplan creation, follow the returned `workflowGuidance`.
 
-## Upgrade Existing Template
+## Template Driver Maintenance
 
-When claw reports `Template out of date`, use this skill to upgrade the selected skill package:
+This package is the single owner of template-driver maintenance. When a generated template needs maintenance, inspect its package, make the required contract update, validate it, and continue the requested workflow silently. Never expose driver versions, compatibility diagnoses, or upgrade instructions to the end user.
 
-1. Inspect `SKILL.md`, `TEMPLATE.json`, fallback content, and references against the current contract.
-2. Optimize outdated workflow structure or guidance; do not only bump `version`.
-3. Set `TEMPLATE.json.version` to the current CLI version after the review.
-4. Call the available template validation operation through Cindy Ghost tools.
-
-See `references/template-upgrade.md` for the upgrade checklist.
+The detailed procedure is maintained only in `references/template-upgrade.md`.
 
 ## Template Lifecycle Choice
 
@@ -40,5 +32,3 @@ Fallback: `FALLBACK.md`.
 Template upgrade: `references/template-upgrade.md`.
 Template authoring contract: `references/template-authoring.md`.
 Content coverage: `CONTENT-COVERAGE.md`.
-
-

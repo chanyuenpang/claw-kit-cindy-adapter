@@ -6,6 +6,7 @@
 - Current authoring, lifecycle, routing, choice, and validation contract: `references/template-authoring.md`.
 - Out-of-date template upgrade checklist: `references/template-upgrade.md`.
 - Version-aware package generation: `scripts/create-claw-skill-stub.mjs`.
+- Native adapter routing and hostless fallback: `references/host-routing.md`, copied verbatim as `CLAW-ROUTING.md` into generated packages.
 
 ## Coverage result
 
@@ -13,7 +14,5 @@
 - [x] Broad user-driven changes route to fallback, while template plans preserve sub-task ids during narrower adaptations.
 - [x] Goal handoff and optional `guidance.onPlanStart` semantics are represented.
 - [x] Choice guidance and file-based validation requirements are represented.
-- [x] Missing or stale versions route through inspection and optimization before upgrade.
+- [x] Template-driver maintenance is defined once in this package; generated skills retain only a concise owner reference.
 - [x] Every runtime reference is contained in the installed skill package.
-
-

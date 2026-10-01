@@ -2,6 +2,12 @@
 // The claw CLI remains user-installed; this resident process only orchestrates
 // the CLI through the declared Node worker and uses Cindy's public Agent slot.
 
+const CINDY_HOST_IDENTITY = "[claw host]\nplatform: cindy\nAdapter-owned host identity, independent of model/provider or skill path. Host/session arguments remain adapter-owned.";
+function withCindyHostIdentity(result) {
+  const body = result && typeof result === "object" && !Array.isArray(result) ? result : { value: result };
+  return { ...body, clawHost: { platform: "cindy" } };
+}
+
 const workdirs = new Map();
 const reconcilingSessions = new Set();
 const capturedTurnKeys = new Set();
@@ -151,7 +157,7 @@ function goalContinuationPrompt(goal) {
   const taskTitle = typeof goal?.taskTitle === 'string' && goal.taskTitle.trim()
     ? `「${goal.taskTitle.trim()}」`
     : '当前任务';
-  return `继续执行当前 claw 计划，完成${taskTitle}。请先遵循 claw-kit workflow guidance，并用 call_tool 记录状态；进入讨论、等待或终态后停止。`;
+  return CINDY_HOST_IDENTITY + "\n\n" + `继续执行当前 claw 计划，完成${taskTitle}。请先遵循 claw-kit workflow guidance，并用 call_tool 记录状态；进入讨论、等待或终态后停止。`;
 }
 
 function escapeHtml(value) {
@@ -460,6 +466,7 @@ async function continueGoalAfterTurnEnd(msg) {
 }
 
 function toolFailure(callId, reason, errorCode = 'CLAW_OPERATION_FAILED') {
+  reason = CINDY_HOST_IDENTITY + '\n\n' + reason;
   cindy.send({ type: 'tool-result', callId, ok: false, errorCode, message: reason });
 }
 
@@ -479,7 +486,7 @@ async function dispatchToolCall(msg) {
     const result = category
       ? categories.find((item) => item.name === category) || { error: `Unknown category: ${category}` }
       : { categories: categories.map((item) => ({ name: item.name, operationCount: item.operations.length })) };
-    cindy.send({ type: 'tool-result', callId: msg.callId, ok: !result.error, result });
+    cindy.send({ type: 'tool-result', callId: msg.callId, ok: !result.error, result: withCindyHostIdentity(result) });
     return;
   }
   if (msg.tool !== 'call_tool') return;
@@ -516,7 +523,7 @@ async function dispatchToolCall(msg) {
   const agentResult = execution.knowledgeDispatch && execution.result && typeof execution.result === 'object'
     ? { ...execution.result, knowledgeDispatch: execution.knowledgeDispatch }
     : execution.result;
-  cindy.send({ type: 'tool-result', callId: msg.callId, ok: true, result: agentResult });
+  cindy.send({ type: 'tool-result', callId: msg.callId, ok: true, result: withCindyHostIdentity(agentResult) });
 }
 
 async function handleToolCall(msg) {

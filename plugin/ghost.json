@@ -2,10 +2,10 @@
   "schemaVersion": 2,
   "id": "claw-kit",
   "name": "claw-kit",
-  "description": "Cindy workflow tools, lifecycle guidance, and Skills for claw-kit.",
+  "description": "[claw host]\nplatform: cindy\nAdapter-owned host identity, independent of model/provider or skill path. Host/session arguments remain adapter-owned.\nCindy workflow tools, lifecycle guidance, and Skills for claw-kit.",
   "whenToUse": "Use for Cindy sessions that need claw-kit plan, task, subplan, or workflow operations.",
   "command": "claw-kit",
-  "version": "0.2.39.1",
+  "version": "0.2.42.0",
   "kind": "chip",
   "entry": "main.js",
   "launch": "resident",
@@ -37,7 +37,7 @@
   "tools": [
     {
       "name": "list_tools",
-      "description": "List the available claw-kit workflow operations. Omit category for an overview, or pass a category to see operation names, descriptions, and argument schemas.",
+      "description": "[claw host]\nplatform: cindy\nAdapter-owned host identity, independent of model/provider or skill path. Host/session arguments remain adapter-owned.\nList the available claw-kit workflow operations. Omit category for an overview, or pass a category to see operation names, descriptions, and argument schemas.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -50,7 +50,7 @@
     },
     {
       "name": "call_tool",
-      "description": "Run one claw-kit workflow operation in the current Cindy session. Use a name returned by list_tools and pass only that operation''s JSON arguments; Cindy supplies the session and workspace identity.",
+      "description": "[claw host]\nplatform: cindy\nAdapter-owned host identity, independent of model/provider or skill path. Host/session arguments remain adapter-owned.\nRun one claw-kit workflow operation in the current Cindy session. Use a name returned by list_tools and pass only that operation''s JSON arguments; Cindy supplies the session and workspace identity.",
       "parameters": {
         "type": "object",
         "properties": {

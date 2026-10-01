@@ -1,6 +1,6 @@
 {
   "name": "@claw-kit/cindy-adapter",
-  "version": "0.2.39.1",
+  "version": "0.2.42.0",
   "private": true,
   "type": "module",
   "description": "Cindy adapter design and skills for landing the claw-kit workflow inside Cindy.",
@@ -15,6 +15,7 @@
   "homepage": "https://github.com/chanyuenpang/claw-kit-cindy-adapter",
   "repository": {
     "type": "git",
-    "url": "https://github.com/chanyuenpang/claw-kit-cindy-adapter.git"
+    "url": "https://github.com/chanyuenpang/claw-kit.git",
+    "directory": "packages/cindy-adapter"
   }
 }
