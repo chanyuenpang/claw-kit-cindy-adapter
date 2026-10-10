@@ -1,10 +1,10 @@
+const { serializeFailure } = require('./failure-diagnostics.cjs');
 const { spawn } = require('node:child_process');
 const readline = require('node:readline');
 const fs = require('node:fs');
 const path = require('node:path');
 const {
   candidateUserDataDirs,
-  readTurnCaptureWithRetry,
   resolveCindySessionContext,
 } = require('./cindy-sqlite-reader.cjs');
 const sessions = new Map();
@@ -34,13 +34,14 @@ const OPERATION_CATALOG = {
   plan: [
     {
       name: 'plan.create',
-      description: 'Create a claw plan for the current Cindy session. This is unavailable while the current plan is in process; use plan.leave first, or subplan.create for work within the current plan.',
+      description: 'Create a claw plan with automatic project setup. An unfinished current plan blocks a new root; use subplan.create within it, or explicitly leave/resume.',
       mutates: true,
       parameters: {
         type: 'object',
         properties: {
           title: { type: 'string', description: 'Plan title.' },
           goal: { type: 'string', description: 'Optional plan goal.' },
+          knowledge_capture: { type: 'boolean', description: 'Knowledge accumulation only; defaults to the template setting or true. False does not change storage or lifecycle.' },
           template: { type: 'string', description: 'Optional template name.' },
           templateFile: { type: 'string', description: 'Optional template file path.' },
         },
@@ -80,7 +81,7 @@ const OPERATION_CATALOG = {
     },
     {
       name: 'plan.done',
-      description: 'Complete the current plan. Project-scoped plans require a retrospective; session-scoped plans do not persist project documentation.',
+      description: 'Complete the current plan following its returned retrospective requirements; opting out of knowledge capture does not change the plan lifecycle.',
       mutates: true,
       parameters: objectParameters({
         retrospective: { type: 'string', description: 'Retrospective summary, required for project-scoped plans.' },
@@ -102,6 +103,12 @@ const OPERATION_CATALOG = {
       parameters: objectParameters({ id: { type: 'number', description: 'Task id.' }, title: stringParameter('Optional task title.'), detail: stringParameter('Optional task detail.'), status: stringParameter('Optional task status.'), choice: stringParameter('Optional route choice when completing.'), taskName: stringParameter('Optional task name.') }, ['id']),
     },
     {
+      name: 'task.remove',
+      description: 'Remove one or more task items from the current plan.',
+      mutates: true,
+      parameters: objectParameters({ id: { type: 'number', description: 'Task id to remove.' }, taskName: stringParameter('Optional task name.') }, ['id']),
+    },
+    {
       name: 'task.done',
       description: 'Mark one task done.',
       mutates: true,
@@ -113,7 +120,7 @@ const OPERATION_CATALOG = {
       name: 'subplan.create',
       description: 'Create a subplan for a parent task.',
       mutates: true,
-      parameters: objectParameters({ parent: { type: 'string', description: 'Parent task directory name (taskName), not the plan title.' }, taskId: { type: 'number', description: 'Parent task id.' }, template: stringParameter('Optional template name.'), templateFile: stringParameter('Optional template file path.') }, ['parent', 'taskId']),
+      parameters: objectParameters({ template: stringParameter('Optional template name.'), templateFile: stringParameter('Optional template file path.') }),
     },
   ],
   search: [
@@ -131,17 +138,22 @@ const OPERATION_CATALOG = {
       mutates: true,
       parameters: objectParameters({ finalizeId: stringParameter('Finalization id returned by plan completion.') }, ['finalizeId']),
     },
+    { name: 'knowledge.claim.receipt', description: 'Recover the authenticated claim materials without claiming again.', mutates: false,
+      parameters: objectParameters({ finalizeId: stringParameter('Exact finalization id.') }, ['finalizeId']) },
+    { name: 'knowledge.done.receipt', description: 'Read the authenticated canonical completion result without mutation.', mutates: false,
+      parameters: objectParameters({ finalizeId: stringParameter('Exact finalization id.'), claimToken: stringParameter('Optional legacy credential.'),
+        expectedStatus: { type: 'string', enum: ['succeeded', 'failed'] }, expectedResult: stringParameter('Expected outcome text for receipt matching.') }, ['finalizeId']) },
     {
       name: 'knowledge.done',
       description: 'Complete a claimed knowledge-finalization job exactly once.',
       mutates: true,
       parameters: objectParameters({
         finalizeId: stringParameter('Finalization id returned by plan completion.'),
-        claimToken: stringParameter('Claim token returned by knowledge.claim.'),
+        claimToken: stringParameter('Optional legacy credential; Core resolves the canonical session claim and rejects a wrong explicit value.'),
         status: { type: 'string', enum: ['succeeded', 'failed'], description: 'Terminal finalization status.' },
         result: stringParameter('Concise success result.'),
         error: stringParameter('Concise failure reason.'),
-      }, ['finalizeId', 'claimToken', 'status']),
+      }, ['finalizeId', 'status']),
     },
   ],
 };
@@ -163,21 +175,8 @@ function stringParameter(description) {
   return { type: 'string', description };
 }
 
-function hasClawProject(workdir) {
-  if (typeof workdir !== 'string' || !workdir.trim()) return false;
-  return fs.existsSync(path.join(path.resolve(workdir), '.claw', 'project.json'));
-}
-
-function catalogForWorkdir(workdir) {
-  const categories = structuredClone(OPERATION_CATALOG);
-  if (typeof workdir === 'string' && workdir.trim() && !hasClawProject(workdir)) {
-    const create = categories.plan.find((operation) => operation.name === 'plan.create');
-    create.parameters.properties.scope = {
-      type: 'string', enum: ['session'],
-      description: 'Only for isolated work outside a .claw project after choosing the session route.',
-    };
-  }
-  return categories;
+function catalogForWorkdir(_workdir) {
+  return structuredClone(OPERATION_CATALOG);
 }
 
 function objectParameters(properties, required = []) {
@@ -202,7 +201,7 @@ function invocation(args) {
 }
 
 class NativeClawSession {
-  constructor(sessionId, workdir, onIdle, onExit, idleMs = SESSION_IDLE_MS) {
+  constructor(sessionId, workdir, onIdle, onExit, idleMs = SESSION_IDLE_MS, receiptOnly = false) {
     this.sessionId = sessionId;
     this.workdir = path.resolve(workdir);
     this.child = null;
@@ -220,6 +219,7 @@ class NativeClawSession {
     this.onIdle = onIdle;
     this.onExit = onExit;
     this.idleMs = idleMs;
+    this.receiptOnly = receiptOnly;
     this.lastActivityAt = Date.now();
     this.closeReason = null;
   }
@@ -248,7 +248,7 @@ class NativeClawSession {
   open() {
     if (this.openPromise) return this.openPromise;
     this.openPromise = new Promise((resolve, reject) => {
-      const command = invocation(['session', 'open', this.workdir, this.sessionId, '--host', 'cindy']);
+      const command = invocation(['session', 'open', this.workdir, this.sessionId, '--host', 'cindy', ...(this.receiptOnly ? ['--receipt-only'] : [])]);
       const child = spawn(command.executable, command.args, {
         cwd: this.workdir,
         env: process.env,
@@ -281,7 +281,7 @@ class NativeClawSession {
         this.stderr = (this.stderr + String(chunk)).slice(-8192);
       });
       child.stdin.on('error', (error) => {
-        this.failPending(sessionError('SESSION_CONNECTION_LOST', error.message, 'unknown'));
+        this.failPending(sessionError('SESSION_CONNECTION_LOST', error.message, 'unknown', error));
       });
       child.on('error', (error) => {
         this.closed = true;
@@ -394,11 +394,11 @@ class NativeClawSession {
   }
 }
 
-function sessionError(code, message, outcome) {
-  const error = new Error(message);
-  error.code = code;
-  error.outcome = outcome;
-  return error;
+function sessionError(code, message, outcome, evidence) {
+  const value = { ...(evidence && typeof evidence === "object" ? evidence : {}), code, message, outcome,
+    ...(evidence?.code && evidence.code !== code ? { cause: evidence } : {}) };
+  const failure = serializeFailure(value, { fallbackCode: code, origin: "cindy.session", fallbackOutcome: outcome });
+  return Object.assign(new Error(failure.message), failure);
 }
 
 function sessionResponseError(response, fallbackCode) {
@@ -407,7 +407,7 @@ function sessionResponseError(response, fallbackCode) {
     return sessionError(
       typeof raw.code === 'string' ? raw.code : fallbackCode,
       typeof raw.message === 'string' ? raw.message : fallbackCode,
-      raw.outcome === 'unknown' ? 'unknown' : 'known',
+      raw.outcome === 'unknown' ? 'unknown' : 'known', raw,
     );
   }
   return sessionError(fallbackCode, typeof raw === 'string' ? raw : fallbackCode, 'known');
@@ -439,7 +439,7 @@ function releaseSession(key, session, reason) {
   }).finally(() => reclaiming.delete(session));
 }
 
-async function ensureSession(sessionId, workdir) {
+async function ensureSession(sessionId, workdir, receiptOnly = false) {
   const identity = validateSessionIdentity(sessionId, workdir);
   const key = `${identity.workdir}\0${identity.sessionId}`;
   let session = sessions.get(key);
@@ -448,7 +448,7 @@ async function ensureSession(sessionId, workdir) {
       releaseSession(key, idle, 'idle-timeout');
     }, (exited) => {
       if (sessions.get(key) === exited) sessions.delete(key);
-    });
+    }, SESSION_IDLE_MS, receiptOnly);
     sessions.set(key, session);
     try {
       await session.open();
@@ -470,16 +470,29 @@ async function shutdownWorker() {
 process.on('SIGINT', () => { void shutdownWorker(); });
 process.on('SIGTERM', () => { void shutdownWorker(); });
 
+function validateCreateArguments(args) {
+  if (Object.hasOwn(args, 'scope')) throw sessionError('PLAN_SCOPE_REMOVED', 'scope is removed; use knowledge_capture for accumulation.', 'known', { phase: 'prepare', effect: 'none' });
+  // Keep the boolean wire value intact across JSON and CLI transports; never
+  // coerce an invalid value into a valid creation flag or silently enable capture.
+  if (args.knowledge_capture !== undefined && typeof args.knowledge_capture !== 'boolean') {
+    throw sessionError('SESSION_COMMAND_INVALID', 'knowledge_capture must be a boolean.', 'known', { phase: 'prepare', effect: 'none' });
+  }
+}
+
 function sessionRequest(name, args, workdir) {
+  if (name === 'plan.create') validateCreateArguments(args);
   switch (name) {
     case 'plan.create': return { operation: name, input: {
       title: requiredString(args, 'title'),
       ...(typeof args.goal === 'string' ? { goalText: args.goal } : {}),
-      ...(args.scope === 'session' ? { scope: 'session' } : {}),
       ...(typeof args.knowledge_capture === 'boolean' ? { knowledgeCapture: args.knowledge_capture } : {}),
       ...(typeof args.template === 'string' ? { templateName: args.template } : {}),
       ...(typeof args.templateFile === 'string' ? { templateFile: path.resolve(args.templateFile) } : {}),
     } };
+    case 'knowledge.claim':
+    case 'knowledge.claim.receipt':
+    case 'knowledge.done':
+    case 'knowledge.done.receipt': return { operation: name, input: { ...args } };
     case 'plan.leave': return { operation: name, input: {} };
     case 'plan.show': return { operation: name, input: { simple: false } };
     case 'plan.start': {
@@ -515,10 +528,11 @@ function sessionRequest(name, args, workdir) {
       ...(typeof args.status === 'string' ? { taskStatus: args.status } : {}),
       ...(typeof args.choice === 'string' ? { taskChoiceId: args.choice } : {}),
     } };
+    case 'task.remove': return { operation: name, input: { tasks: [{ id: requiredNumber(args, 'id') }] } };
     case 'task.done': return { operation: name, input: { tasks: [{ id: requiredNumber(args, 'id'), ...(typeof args.choice === 'string' ? { choiceId: args.choice } : {}) }] } };
     case 'subplan.create': return { operation: name, input: {
-      parentTaskName: requiredString(args, 'parent'),
-      parentTaskId: requiredNumber(args, 'taskId'),
+      ...(typeof args.parent === 'string' ? { parentTaskName: args.parent } : {}),
+      ...(typeof args.taskId === 'number' ? { parentTaskId: args.taskId } : {}),
       ...(typeof args.template === 'string' ? { templateName: args.template } : {}),
       ...(typeof args.templateFile === 'string' ? { templateFile: path.resolve(args.templateFile) } : {}),
     } };
@@ -570,8 +584,7 @@ function runClaw(args, cwd, input, timeoutMs, sessionId) {
       child.kill();
       finish({
         ok: false,
-        errorCode: 'CLAW_CLI_TIMEOUT',
-        reason: `claw CLI timed out after ${timeoutMs}ms.`,
+        ...operationFailure({ code: 'ETIMEDOUT', message: `claw CLI timed out after ${timeoutMs}ms.`, operation: 'cli.invoke', phase: 'response-wait', outcome: 'unknown', effect: 'unknown' }, 'CLAW_CLI_TIMEOUT'),
       });
     }, timeoutMs);
     child.stdout.on('data', (chunk) => { stdout += String(chunk); });
@@ -579,8 +592,7 @@ function runClaw(args, cwd, input, timeoutMs, sessionId) {
     child.on('error', (error) => {
       finish({
         ok: false,
-        errorCode: 'CLAW_CLI_UNAVAILABLE',
-        reason: `claw CLI is unavailable: ${error.message}`,
+        ...operationFailure(error, 'CLAW_CLI_UNAVAILABLE'),
       });
     });
     child.on('close', (code) => {
@@ -589,7 +601,7 @@ function runClaw(args, cwd, input, timeoutMs, sessionId) {
         const failure = operationFailure(stderr, 'CLAW_CLI_EXITED');
         finish({
           ok: false,
-          errorCode: failure.errorCode,
+          ...failure,
           reason: failure.errorCode === 'CLAW_CLI_EXITED'
             ? (stderr.trim()
               ? `claw CLI exited with code ${code}: ${failure.reason}`
@@ -638,31 +650,21 @@ function requiredNumber(args, name) {
   return value;
 }
 
-function operationFailure(rawReason, fallbackCode = 'CLAW_OPERATION_FAILED') {
-  const reason = typeof rawReason === 'string' && rawReason.trim()
-    ? rawReason.trim()
-    : 'claw-kit operation failed.';
-  try {
-    const parsed = JSON.parse(reason);
-    const error = parsed?.error;
-    const errorCode = typeof error?.code === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(error.code)
-      ? error.code
-      : fallbackCode;
-    const message = typeof error?.message === 'string' && error.message.trim()
-      ? error.message.trim()
-      : reason;
-    return { errorCode, reason: message };
-  } catch {
-    return { errorCode: fallbackCode, reason };
-  }
+function operationFailure(rawReason, fallbackCode) {
+  let value;
+  try { value = JSON.parse(typeof rawReason === 'string' ? rawReason : ''); }
+  catch { value = typeof rawReason === 'string' ? new Error(rawReason) : rawReason; }
+  const failure = serializeFailure(value, { fallbackCode, origin: 'cindy.cli', fallbackOutcome: 'unknown' });
+  return { ...failure, errorCode: failure.code, reason: failure.message };
 }
 
 function operationCommand(name, args) {
+  if (name === 'plan.create') validateCreateArguments(args);
   switch (name) {
     case 'plan.create': {
       const command = ['plan', 'create', '--title', requiredString(args, 'title')];
       appendOption(command, '--goal', args.goal);
-      appendOption(command, '--scope', args.scope);
+      if (args.knowledge_capture !== undefined) command.push('--knowledge-capture', String(args.knowledge_capture));
       appendOption(command, '--template', args.template);
       appendOption(command, '--template-file', args.templateFile);
       return command;
@@ -705,6 +707,11 @@ function operationCommand(name, args) {
       appendOption(command, '--task-name', args.taskName);
       return command;
     }
+    case 'task.remove': {
+      const command = ['task', 'remove', '--id', String(requiredNumber(args, 'id'))];
+      appendOption(command, '--task-name', args.taskName);
+      return command;
+    }
     case 'task.done': {
       const command = ['task', 'done', '--id', String(requiredNumber(args, 'id'))];
       appendOption(command, '--choice', args.choice);
@@ -712,7 +719,9 @@ function operationCommand(name, args) {
       return command;
     }
     case 'subplan.create': {
-      const command = ['subplan', 'create', '--parent', requiredString(args, 'parent'), '--task-id', String(requiredNumber(args, 'taskId'))];
+      const command = ['subplan', 'create'];
+      appendOption(command, '--parent', args.parent);
+      appendOption(command, '--task-id', args.taskId);
       appendOption(command, '--template', args.template);
       appendOption(command, '--template-file', args.templateFile);
       return command;
@@ -843,22 +852,9 @@ function cindyAgentResult(output, operation) {
   if (operation === 'search') {
     return { results: Array.isArray(output.results) ? output.results : [] };
   }
-  if (operation === 'knowledge.claim') {
-    return {
-      ...(output.claimed === true ? { claimed: true } : {}),
-      ...(typeof output.finalizeId === 'string' ? { finalizeId: output.finalizeId } : {}),
-      ...(typeof output.claimToken === 'string' ? { claimToken: output.claimToken } : {}),
-      ...(Array.isArray(output.assignments) ? { assignments: output.assignments } : {}),
-      ...(typeof output.templatePath === 'string' ? { templatePath: output.templatePath } : {}),
-    };
-  }
-  if (operation === 'knowledge.done') {
-    return {
-      ...(typeof output.finalizeId === 'string' ? { finalizeId: output.finalizeId } : {}),
-      ...(typeof output.status === 'string' ? { status: output.status } : {}),
-      ...(output.completed === true ? { completed: true } : {}),
-    };
-  }
+  // Preserve shared business results, including additive receipt/material and
+  // deferred-closeout fields. Only plan presentation needs a compact projection.
+  if (operation.startsWith('knowledge.')) return output;
   if (operation === 'plan.show') {
     const plan = output.plan && typeof output.plan === 'object' ? output.plan : {};
     const planStatus = typeof plan.status === 'string' ? plan.status : '';
@@ -1059,50 +1055,6 @@ rpcInput.on('line', async (line) => {
     reply(request.id, result.ok ? { ok: true } : { ok: false, error: result.error });
     return;
   }
-  if (request.method === 'claw/capture-report') {
-    const cindySessionId = typeof params.sessionId === 'string' ? params.sessionId : '';
-    const clawSessionId = typeof params.clawSessionId === 'string' && params.clawSessionId.trim()
-      ? params.clawSessionId.trim()
-      : cindySessionId;
-    const workdir = typeof params.workdir === 'string' ? params.workdir : '';
-    traceWorker('capture-report', {
-      phase: 'received',
-      cindySessionId: cindySessionId || null,
-      clawSessionId: clawSessionId || null,
-    });
-    const captureInput = await readTurnCaptureWithRetry(cindySessionId);
-    if (!captureInput) {
-      traceWorker('capture-report', {
-        phase: 'capture-failed',
-        cindySessionId: cindySessionId || null,
-        clawSessionId: clawSessionId || null,
-        errorCode: 'CINDY_TURN_NOT_PERSISTED',
-      });
-      reply(request.id, { ok: true, captured: false, error: 'Cindy SQLite did not expose a completed assistant message yet.' });
-      return;
-    }
-    const { turnId, message, taskConclusions } = captureInput;
-    const result = await runClaw(
-      ['internal-knowledge-capture', '--host', 'cindy'],
-      workdir,
-      JSON.stringify({ cwd: workdir, session_id: clawSessionId, turn_id: turnId, message, task_conclusions: taskConclusions }),
-      10000,
-      clawSessionId,
-    );
-    traceWorker('capture-report', {
-      phase: result.ok && result.output?.captured ? 'captured' : 'capture-failed',
-      cindySessionId,
-      clawSessionId,
-      turnId,
-      errorCode: result.ok ? null : (result.errorCode || 'CLAW_CAPTURE_FAILED'),
-      finalizeId: result.output?.finalizeId || null,
-      reportPath: result.output?.reportPath || null,
-    });
-    reply(request.id, result.ok
-      ? { ok: true, turnId, message, ...(result.output || {}), cindySessionId, clawSessionId }
-      : { ok: false, error: result.error, cindySessionId, clawSessionId });
-    return;
-  }
   if (request.method === 'claw/register-knowledge-writer') {
     const finalizeId = typeof params.finalizeId === 'string' ? params.finalizeId : '';
     const jobPath = typeof params.jobPath === 'string' ? params.jobPath : '';
@@ -1149,7 +1101,6 @@ rpcInput.on('line', async (line) => {
       finalizeId,
       status: job.status,
       attempts: job.attempts,
-      executionPolicy: job.writer?.executionPolicy || 'background',
       ...(typeof job.result === 'string' ? { result: job.result } : {}),
       ...(typeof job.error?.message === 'string' ? { error: job.error.message } : {}),
     });
@@ -1222,103 +1173,7 @@ rpcInput.on('line', async (line) => {
       let envelope = {};
       let completedSession;
       let completedOrdinal;
-      if (operation === 'knowledge.claim') {
-        const finalizeId = requiredString(operationArgs, 'finalizeId');
-        const located = await runClaw([
-          'knowledge', 'wait',
-          '--project-root', params.workdir,
-          '--finalize-id', finalizeId,
-          '--timeout-ms', '0',
-          '--host', 'cindy',
-        ], params.workdir, undefined, 10000, params.sessionId);
-        const jobPath = typeof located.output?.jobPath === 'string' ? located.output.jobPath : '';
-        let job;
-        try { job = JSON.parse(fs.readFileSync(jobPath, 'utf8')); } catch {
-          reply(request.id, {
-            ok: false,
-            operation,
-            errorCode: located.errorCode || 'KNOWLEDGE_JOB_UNAVAILABLE',
-            reason: located.reason || 'Knowledge finalization job is unavailable.',
-          });
-          return;
-        }
-        if (job.finalizeId !== finalizeId) {
-          reply(request.id, {
-            ok: false,
-            operation,
-            errorCode: 'KNOWLEDGE_JOB_MISMATCH',
-            reason: 'Knowledge finalization job does not match the dispatched finalizer.',
-          });
-          return;
-        }
-        const claimed = await runClaw([
-          'knowledge', 'claim',
-          '--job', jobPath,
-          '--host', 'cindy',
-        ], params.workdir, undefined, 30000, params.sessionId);
-        if (!claimed.ok) {
-          reply(request.id, {
-            ok: false,
-            operation,
-            errorCode: claimed.errorCode || 'KNOWLEDGE_CLAIM_FAILED',
-            reason: claimed.reason || 'Knowledge finalization claim failed.',
-          });
-          return;
-        }
-        output = claimed.output;
-      } else if (operation === 'knowledge.done') {
-        const finalizeId = requiredString(operationArgs, 'finalizeId');
-        const claimToken = requiredString(operationArgs, 'claimToken');
-        const status = requiredString(operationArgs, 'status');
-        if (status !== 'succeeded' && status !== 'failed') throw new Error('status must be succeeded or failed.');
-        const messageFlag = status === 'succeeded' ? '--result' : '--error';
-        const message = requiredString(operationArgs, status === 'succeeded' ? 'result' : 'error');
-        const located = await runClaw([
-          'knowledge', 'wait',
-          '--project-root', params.workdir,
-          '--finalize-id', finalizeId,
-          '--timeout-ms', '0',
-          '--host', 'cindy',
-        ], params.workdir, undefined, 10000, params.sessionId);
-        const jobPath = typeof located.output?.jobPath === 'string' ? located.output.jobPath : '';
-        let job;
-        try { job = JSON.parse(fs.readFileSync(jobPath, 'utf8')); } catch {
-          reply(request.id, {
-            ok: false,
-            operation,
-            errorCode: located.errorCode || 'KNOWLEDGE_JOB_UNAVAILABLE',
-            reason: located.reason || 'Knowledge finalization job is unavailable.',
-          });
-          return;
-        }
-        if (job.finalizeId !== finalizeId) {
-          reply(request.id, {
-            ok: false,
-            operation,
-            errorCode: 'KNOWLEDGE_JOB_MISMATCH',
-            reason: 'Knowledge finalization job does not match the dispatched finalizer.',
-          });
-          return;
-        }
-        const completed = await runClaw([
-          'knowledge', 'done',
-          '--job', jobPath,
-          '--claim-token', claimToken,
-          '--status', status,
-          messageFlag, message,
-          '--host', 'cindy',
-        ], params.workdir, undefined, 30000, params.sessionId);
-        if (!completed.ok) {
-          reply(request.id, {
-            ok: false,
-            operation,
-            errorCode: completed.errorCode || 'KNOWLEDGE_DONE_FAILED',
-            reason: completed.reason || 'Knowledge finalization completion failed.',
-          });
-          return;
-        }
-        output = completed.output || { ok: true, finalizeId, status };
-      } else if (operation === 'knowledge.complete') {
+      if (operation === 'knowledge.complete') {
         const finalizeId = requiredString(operationArgs, 'finalizeId');
         const resultText = requiredString(operationArgs, 'result');
         const located = await runClaw([
@@ -1355,10 +1210,42 @@ rpcInput.on('line', async (line) => {
         }
         output = result.output;
       } else {
-        const session = await ensureSession(params.sessionId, params.workdir);
-        const command = session.request(sessionRequest(operation, operationArgs, params.workdir));
+        const mapped = sessionRequest(operation, operationArgs, params.workdir);
+        const session = await ensureSession(params.sessionId, params.workdir, ["knowledge.done", "knowledge.done.receipt", "knowledge.claim.receipt"].includes(operation));
+        const command = session.request(mapped);
         const ordinal = session.requestsStarted;
-        const response = await command;
+        let response;
+        try { response = await command; }
+        catch (error) {
+          if (!['knowledge.claim', 'knowledge.done'].includes(operation) || error?.outcome !== 'unknown') throw error;
+          releaseSession(session.workdir + '\0' + session.sessionId, session, 'knowledge-unknown');
+          const original = mapped.input;
+          let receipt;
+          try {
+            const recovery = await ensureSession(params.sessionId, params.workdir, true);
+            receipt = await recovery.request(operation === 'knowledge.claim'
+              ? { operation: 'knowledge.claim.receipt', input: { finalizeId: original.finalizeId } }
+              : { operation: 'knowledge.done.receipt', input: {
+                  finalizeId: original.finalizeId, expectedStatus: original.status,
+                  expectedResult: original.status === 'succeeded' ? original.result : original.error,
+                  ...(original.claimToken !== undefined ? { claimToken: original.claimToken } : {}),
+                } });
+            if (receipt.ok === false) { const detail = serializeFailure(receipt.error ?? receipt, { fallbackCode: "KNOWLEDGE_RECEIPT_FAILED", operation: operation + ".receipt", origin: "cindy" }); throw Object.assign(new Error(detail.message), detail); }
+          } catch (diagnostic) {
+            error.diagnostics = [...(Array.isArray(error.diagnostics) ? error.diagnostics : []), serializeFailure(diagnostic, {
+              fallbackCode: 'KNOWLEDGE_RECEIPT_FAILED', origin: 'cindy', operation: operation + '.receipt', fallbackOutcome: 'unknown' })].slice(0, 3);
+            throw error;
+          }
+          if (operation === 'knowledge.claim') {
+            if (receipt.output?.claimed !== true) throw error;
+            response = { ok: true, output: { ...receipt.output, command: 'knowledge.claim', claimRecovered: true } };
+          } else {
+            if (receipt.output?.terminal !== true || receipt.output?.matches !== true) throw error;
+            response = { ok: true, output: { command: 'knowledge.done', finalizeId: original.finalizeId,
+              ...(original.status === 'succeeded' ? { completed: true } : { failed: true }),
+              alreadyDone: true, completionRecovered: true, delegateCloseDeferred: true, postCommitEffectsVerified: false } };
+          }
+        }
         if (operation === 'plan.done') { completedSession = session; completedOrdinal = ordinal; }
         output = response.output;
         envelope = {
@@ -1370,7 +1257,7 @@ rpcInput.on('line', async (line) => {
       reply(request.id, {
         ok: true,
         operation,
-        result: cindyAgentResult(output, operation),
+        result: { ...cindyAgentResult(output, operation), ...(Array.isArray(output?.postCommandFailures) ? { postCommandFailures: output.postCommandFailures } : {}) },
         ...(projectionFor(output) ? { projection: projectionFor(output) } : {}),
         ...envelope,
       });
@@ -1383,9 +1270,8 @@ rpcInput.on('line', async (line) => {
         releaseSession(key, completedSession, 'plan.done');
       }
     } catch (error) {
-      const structured = typeof error?.code === 'string'
-        ? { errorCode: error.code, reason: error.message }
-        : operationFailure(error instanceof Error ? error.message : String(error), 'INVALID_OPERATION_ARGUMENTS');
+      const failure = serializeFailure(error, { fallbackCode: 'WORKER_OPERATION_FAILED', origin: 'cindy', operation, fallbackOutcome: 'unknown' });
+      const structured = { ...failure, errorCode: failure.code, reason: failure.message };
       reply(request.id, {
         ok: false,
         operation,

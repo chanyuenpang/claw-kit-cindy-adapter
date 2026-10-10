@@ -42,8 +42,11 @@ a matching adapter update, not manual Team/native choreography.
 
 ## Knowledge closeout
 
-The adapter, not the model, owns capability-selected Team/native finalizer
-dispatch and safe role reuse for the default finalization route. The adapter owns report capture and worker
+The adapter, not the model, owns native-subagent finalizer dispatch and safe
+role reuse for the default finalization route. Low-cost model/effort values are
+best-effort preferences: the adapter may apply another supported option or the
+Host default and reports the applied/unknown result without blocking on an exact
+match. The adapter owns report capture and worker
 dispatch and returns compact evidence; follow that evidence rather than
 reconstructing collector internals or timing from this skill.
 Do not spawn another finalizer, run its prompt yourself, poll the worker, or
@@ -55,6 +58,6 @@ as completed Truth/ADR deposition. Do not replay plan.done to repair dispatch.
 but the current `claw_run` contract does not expose knowledge.prepare or
 knowledge.complete. If terminal guidance requests this chain, surface the
 unsupported adapter route and leave closeout visibly incomplete. Do not invent
-these operations, shell-bypass the adapter, silently change the policy, or use
+these operations, shell-bypass the adapter, change the executor, or use
 the public manual capture skill. A separate runtime fix is required before
-this route can execute that policy.
+this route can execute finalization.
