@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "@veewo/claw-skills",
-  "version": "0.2.52",
+  "version": "0.2.53",
   "sourceHash": "081a0663f211c4e481996cfcd46bd53cc5d5e3d1ff85720950147e72ab0e900b",
   "skills": {
     "planning": "366722092b495e891a38167a8ef8b63e14aff9ae60d0553a6540e817f55bed64",
