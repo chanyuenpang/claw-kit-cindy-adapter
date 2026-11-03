@@ -13,6 +13,12 @@ const reclaiming = new Set();
 const configuredIdleMs = Number(process.env.CLAW_CINDY_SESSION_IDLE_MS);
 const SESSION_IDLE_MS = Number.isSafeInteger(configuredIdleMs) && configuredIdleMs >= 1000
   ? configuredIdleMs : 10 * 60 * 1000;
+// The outer transport budget must outlive the CLI's own startup budget (node
+// start plus the client's 5s daemon-start wait) so a slow cold start or a real
+// CLI failure is reported with its cause instead of a bare transport timeout.
+const configuredOpenMs = Number(process.env.CLAW_CINDY_SESSION_OPEN_TIMEOUT_MS);
+const SESSION_OPEN_TIMEOUT_MS = Number.isSafeInteger(configuredOpenMs) && configuredOpenMs >= 1000
+  ? configuredOpenMs : 15000;
 
 function traceWorker(event, fields = {}) {
   const record = { source: 'claw-kit-cindy', event, ts: new Date().toISOString(), ...fields };
@@ -133,29 +139,8 @@ const OPERATION_CATALOG = {
     },
   ],
   knowledge: [
-    {
-      name: 'knowledge.claim',
-      description: 'Atomically capture the originating Cindy task conclusions and claim a ready knowledge-finalization job.',
-      mutates: true,
-      parameters: objectParameters({ finalizeId: stringParameter('Finalization id returned by plan completion.') }, ['finalizeId']),
-    },
-    { name: 'knowledge.claim.receipt', description: 'Recover the authenticated claim materials without claiming again.', mutates: false,
-      parameters: objectParameters({ finalizeId: stringParameter('Exact finalization id.') }, ['finalizeId']) },
-    { name: 'knowledge.done.receipt', description: 'Read the authenticated canonical completion result without mutation.', mutates: false,
-      parameters: objectParameters({ finalizeId: stringParameter('Exact finalization id.'), claimToken: stringParameter('Optional legacy credential.'),
-        expectedStatus: { type: 'string', enum: ['succeeded', 'failed'] }, expectedResult: stringParameter('Expected outcome text for receipt matching.') }, ['finalizeId']) },
-    {
-      name: 'knowledge.done',
-      description: 'Complete a claimed knowledge-finalization job exactly once.',
-      mutates: true,
-      parameters: objectParameters({
-        finalizeId: stringParameter('Finalization id returned by plan completion.'),
-        claimToken: stringParameter('Optional legacy credential; Core resolves the canonical session claim and rejects a wrong explicit value.'),
-        status: { type: 'string', enum: ['succeeded', 'failed'], description: 'Terminal finalization status.' },
-        result: stringParameter('Concise success result.'),
-        error: stringParameter('Concise failure reason.'),
-      }, ['finalizeId', 'status']),
-    },
+    { name: 'knowledge.materials', description: 'Read the complete source plan and its ordinary conversation, and provide non-capturing writer templates.', mutates: false,
+      parameters: objectParameters({ sourceSessionKey: stringParameter('Source conversation session key.'), sourcePlan: stringParameter('Complete source plan path.') }, ['sourceSessionKey', 'sourcePlan']) },
   ],
 };
 
@@ -210,6 +195,7 @@ class NativeClawSession {
     this.buffer = '';
     this.pending = null;
     this.openPromise = null;
+    this.opened = false;
     this.closed = false;
     this.chain = Promise.resolve();
     this.queued = 0;
@@ -250,6 +236,7 @@ class NativeClawSession {
     if (this.openPromise) return this.openPromise;
     this.openPromise = new Promise((resolve, reject) => {
       const command = invocation(['session', 'open', this.workdir, this.sessionId, '--host', 'cindy', ...(this.receiptOnly ? ['--receipt-only'] : [])]);
+      const startedAt = Date.now();
       const child = spawn(command.executable, command.args, {
         cwd: this.workdir,
         env: process.env,
@@ -257,11 +244,19 @@ class NativeClawSession {
         stdio: ['pipe', 'pipe', 'pipe'],
       });
       this.child = child;
-      traceWorker('session-transport-open', { sessionId: this.sessionId, workdir: this.workdir, pid: child.pid });
+      traceWorker('session-transport-open', { sessionId: this.sessionId, workdir: this.workdir, pid: child.pid,
+        executable: path.basename(command.executable), timeoutMs: SESSION_OPEN_TIMEOUT_MS });
       const timer = setTimeout(() => {
-        this.failPending(sessionError('CLAW_SESSION_OPEN_TIMEOUT', 'claw session open timed out.', 'known'));
+        const elapsedMs = Date.now() - startedAt;
+        // Reject the pending open before the close handler can race it, then
+        // keep the structured failure so the caller sees elapsed time, the
+        // launch shape and any CLI stderr instead of a bare timeout.
+        this.failPending(this.openTimeoutError(command, elapsedMs));
+        traceWorker('session-transport-timeout', { sessionId: this.sessionId, workdir: this.workdir, pid: child.pid,
+          elapsedMs, timeoutMs: SESSION_OPEN_TIMEOUT_MS, launch: describeLaunch(command),
+          stderr: this.stderrTail(2000) || null });
         child.kill();
-      }, 5000);
+      }, SESSION_OPEN_TIMEOUT_MS);
       this.pending = {
         resolve: (value) => {
           clearTimeout(timer);
@@ -269,6 +264,7 @@ class NativeClawSession {
             reject(sessionResponseError(value, 'CLAW_SESSION_OPEN_FAILED'));
             return;
           }
+          this.opened = true;
           this.scheduleIdle();
           resolve(this);
         },
@@ -294,8 +290,21 @@ class NativeClawSession {
         this.closed = true;
         this.clearIdle();
         this.onExit?.(this);
-        traceWorker('session-transport-exit', { sessionId: this.sessionId, workdir: this.workdir, pid: child.pid, code, reason: this.closeReason || 'unexpected' });
         const detail = this.stderr.trim();
+        // A CLI that rejects the handshake writes one structured error (with
+        // its own code such as SESSION_DAEMON_UNAVAILABLE) to stderr. Preserve
+        // that cause instead of collapsing it into a generic connection loss.
+        const structured = this.opened ? null : parseCliStderrFailure(detail);
+        traceWorker('session-transport-exit', { sessionId: this.sessionId, workdir: this.workdir, pid: child.pid,
+          code, reason: this.closeReason || 'unexpected', ...(structured ? { errorCode: structured.code } : {}) });
+        if (structured) {
+          this.failPending(sessionError(structured.code, structured.message, 'known', {
+            phase: 'transport',
+            operation: structured.operation || 'session.open',
+            ...(structured.diagnostics ? { diagnostics: structured.diagnostics } : {}),
+          }));
+          return;
+        }
         this.failPending(sessionError(
           'SESSION_CONNECTION_LOST',
           detail || `claw session exited with code ${String(code)}.`,
@@ -323,6 +332,28 @@ class NativeClawSession {
       this.pending = null;
       pending?.resolve(value);
     }
+  }
+
+  stderrTail(limit = 1200) {
+    const value = this.stderr.trim();
+    return value.length > limit ? value.slice(-limit) : value;
+  }
+
+  openTimeoutError(command, elapsedMs) {
+    const launch = describeLaunch(command);
+    const pid = this.child?.pid ?? null;
+    const stderrTail = this.stderrTail();
+    const message = `claw session open timed out after ${elapsedMs}ms (limit ${SESSION_OPEN_TIMEOUT_MS}ms, pid ${pid ?? 'unknown'}, launch ${launch})`
+      + (stderrTail ? '; the CLI stderr tail is attached as a diagnostic.' : '; the CLI produced no stdout or stderr before the timeout.');
+    return sessionError('CLAW_SESSION_OPEN_TIMEOUT', message, 'known', {
+      phase: 'transport',
+      operation: 'session.open',
+      diagnostics: [
+        { code: 'SESSION_OPEN_BUDGET', outcome: 'known',
+          message: `${elapsedMs}ms elapsed of ${SESSION_OPEN_TIMEOUT_MS}ms; pid ${pid ?? 'unknown'}; launch ${launch}` },
+        ...(stderrTail ? [{ code: 'SESSION_OPEN_STDERR', outcome: 'known', message: stderrTail }] : []),
+      ],
+    });
   }
 
   request(request, timeoutMs = 30000) {
@@ -400,6 +431,45 @@ function sessionError(code, message, outcome, evidence) {
     ...(evidence?.code && evidence.code !== code ? { cause: evidence } : {}) };
   const failure = serializeFailure(value, { fallbackCode: code, origin: "cindy.session", fallbackOutcome: outcome });
   return Object.assign(new Error(failure.message), failure);
+}
+
+function describeLaunch(command) {
+  const args = Array.isArray(command.args) ? command.args : [];
+  // The cmd.exe fallback carries the shim in argv; the direct Node shape
+  // carries the CLI script. Name whichever entry actually launches claw.
+  const entry = args.find((arg) => typeof arg === 'string' && /claw(\.cmd)?$/i.test(arg))
+    ?? args.find((arg) => typeof arg === 'string' && /[\\/]/.test(arg))
+    ?? args[0];
+  return [path.basename(command.executable), typeof entry === 'string' ? path.basename(entry) : null]
+    .filter(Boolean).join(' ');
+}
+
+// The CLI writes one JSON error envelope to stderr before exiting when it
+// cannot complete the handshake. It may be pretty-printed and preceded by
+// Node warnings, so try every object start until one parses to the end.
+function parseCliStderrFailure(stderr) {
+  if (typeof stderr !== 'string' || !stderr.trim()) return null;
+  const text = stderr.trim();
+  for (let index = text.indexOf('{'); index >= 0; index = text.indexOf('{', index + 1)) {
+    let value;
+    try { value = JSON.parse(text.slice(index)); } catch { continue; }
+    const error = value && typeof value === 'object' && value.error && typeof value.error === 'object'
+      ? value.error
+      : value;
+    if (!error || typeof error !== 'object') continue;
+    const code = typeof error.code === 'string' && /^[A-Za-z][A-Za-z0-9_.:/-]{0,95}$/.test(error.code)
+      ? error.code : null;
+    if (!code) continue;
+    return {
+      code,
+      message: typeof error.message === 'string' && error.message.trim()
+        ? error.message.trim()
+        : 'claw session exited before the handshake.',
+      ...(typeof error.operation === 'string' ? { operation: error.operation } : {}),
+      ...(Array.isArray(error.diagnostics) ? { diagnostics: error.diagnostics.slice(0, 3) } : {}),
+    };
+  }
+  return null;
 }
 
 function sessionResponseError(response, fallbackCode) {
@@ -490,6 +560,7 @@ function sessionRequest(name, args, workdir) {
       ...(typeof args.template === 'string' ? { templateName: args.template } : {}),
       ...(typeof args.templateFile === 'string' ? { templateFile: path.resolve(args.templateFile) } : {}),
     } };
+    case 'knowledge.materials':
     case 'knowledge.claim':
     case 'knowledge.claim.receipt':
     case 'knowledge.done':
@@ -1047,16 +1118,9 @@ rpcInput.on('line', async (line) => {
       });
       return;
     }
-    const reconciliation = await runClaw([
-      'knowledge', 'list',
-      '--project-root', params.workdir,
-      '--session-key', params.sessionId,
-      '--job-host', 'cindy',
-    ], params.workdir, undefined, 10000, params.sessionId);
     reply(request.id, {
       ok: true,
       ...(projectionForContext(result.output) ? { projection: projectionForContext(result.output) } : {}),
-      ...(Array.isArray(reconciliation.output?.jobs) ? { knowledgeJobs: reconciliation.output.jobs } : {}),
     });
     return;
   }
@@ -1228,42 +1292,11 @@ rpcInput.on('line', async (line) => {
       } else {
         const mapped = sessionRequest(operation, operationArgs, params.workdir);
         // Collector registration belongs to capture, not session recovery.
-        const collectorRegistration = operation === 'knowledge.claim' ? await registerCindyCollector(params) : null;
-        const session = await ensureSession(params.sessionId, params.workdir, ["knowledge.done", "knowledge.done.receipt", "knowledge.claim.receipt"].includes(operation));
+        const collectorRegistration = operation === 'knowledge.materials' ? await registerCindyCollector(params) : null;
+        const session = await ensureSession(params.sessionId, params.workdir, ["knowledge.materials", "knowledge.done", "knowledge.done.receipt", "knowledge.claim.receipt"].includes(operation));
         const command = session.request(mapped);
         const ordinal = session.requestsStarted;
-        let response;
-        try { response = await command; }
-        catch (error) {
-          if (!['knowledge.claim', 'knowledge.done'].includes(operation) || error?.outcome !== 'unknown') throw error;
-          releaseSession(session.workdir + '\0' + session.sessionId, session, 'knowledge-unknown');
-          const original = mapped.input;
-          let receipt;
-          try {
-            const recovery = await ensureSession(params.sessionId, params.workdir, true);
-            receipt = await recovery.request(operation === 'knowledge.claim'
-              ? { operation: 'knowledge.claim.receipt', input: { finalizeId: original.finalizeId } }
-              : { operation: 'knowledge.done.receipt', input: {
-                  finalizeId: original.finalizeId, expectedStatus: original.status,
-                  expectedResult: original.status === 'succeeded' ? original.result : original.error,
-                  ...(original.claimToken !== undefined ? { claimToken: original.claimToken } : {}),
-                } });
-            if (receipt.ok === false) { const detail = serializeFailure(receipt.error ?? receipt, { fallbackCode: "KNOWLEDGE_RECEIPT_FAILED", operation: operation + ".receipt", origin: "cindy" }); throw Object.assign(new Error(detail.message), detail); }
-          } catch (diagnostic) {
-            error.diagnostics = [...(Array.isArray(error.diagnostics) ? error.diagnostics : []), serializeFailure(diagnostic, {
-              fallbackCode: 'KNOWLEDGE_RECEIPT_FAILED', origin: 'cindy', operation: operation + '.receipt', fallbackOutcome: 'unknown' })].slice(0, 3);
-            throw error;
-          }
-          if (operation === 'knowledge.claim') {
-            if (receipt.output?.claimed !== true) throw error;
-            response = { ok: true, output: { ...receipt.output, command: 'knowledge.claim', claimRecovered: true } };
-          } else {
-            if (receipt.output?.terminal !== true || receipt.output?.matches !== true) throw error;
-            response = { ok: true, output: { command: 'knowledge.done', finalizeId: original.finalizeId,
-              ...(original.status === 'succeeded' ? { completed: true } : { failed: true }),
-              alreadyDone: true, completionRecovered: true, delegateCloseDeferred: true, postCommitEffectsVerified: false } };
-          }
-        }
+        const response = await command;
         if (operation === 'plan.done') { completedSession = session; completedOrdinal = ordinal; }
         output = response.output;
         if (collectorRegistration && !collectorRegistration.ok) {
