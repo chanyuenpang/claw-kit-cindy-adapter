@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
   "host": "cindy",
-  "version": "0.2.70.0",
-  "skillSourceHash": "6200af1c30a54083544963f37df3e051e5477f93b0a4955b5a21a7ae09ff4b20",
-  "payloadHash": "f10dea4ac9266c0d6109458cbe0814a01e4839eaf5a17aa111ed47e85b3caff2",
+  "version": "0.2.70.1",
+  "skillSourceHash": "4e1399353ed124df0302d8d889829b49b2f9403889ba429c559412280e37a566",
+  "payloadHash": "a96937651af4d2b141a1830a64c8fad0836b20774ab5d9599039ac329d90d41a",
   "sourceRepository": "https://github.com/chanyuenpang/claw-kit",
   "publicationRepository": "https://github.com/chanyuenpang/claw-kit-cindy-adapter"
 }
