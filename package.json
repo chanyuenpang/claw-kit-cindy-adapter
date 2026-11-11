@@ -1,6 +1,6 @@
 {
   "name": "@claw-kit/cindy-adapter",
-  "version": "0.2.70.1",
+  "version": "0.2.72.0",
   "private": true,
   "type": "module",
   "description": "Cindy adapter design and skills for landing the claw-kit workflow inside Cindy.",
@@ -20,6 +20,6 @@
   },
   "sharedSkills": {
     "package": "@veewo/claw-skills",
-    "minVersion": "0.2.66"
+    "minVersion": "0.2.68"
   }
 }
